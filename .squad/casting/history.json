@@ -1,0 +1,13 @@
+{
+  "snapshots": [
+    {
+      "timestamp": "2025-07-22T00:00:00Z",
+      "event": "initial_assignment",
+      "assignments": {
+        "grant": { "role": "Lead", "universe": "Jurassic Park", "character": "Dr. Alan Grant" },
+        "malcolm": { "role": "Content Dev", "universe": "Jurassic Park", "character": "Dr. Ian Malcolm" },
+        "ellie": { "role": "Reviewer", "universe": "Jurassic Park", "character": "Dr. Ellie Sattler" }
+      }
+    }
+  ]
+}
