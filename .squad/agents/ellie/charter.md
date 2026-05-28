@@ -5,6 +5,12 @@ Reviewer responsible for ensuring challenge solutions are correct, complete, and
 
 ## Responsibilities
 - Review challenge solutions for correctness against challenge requirements
+- **README quality gate (mandatory)**: Every challenge MUST have a README.md that:
+  - Explains the underlying concept/technology in depth (not just the code)
+  - Describes how it works in the real world
+  - Walks through the implementation step-by-step
+  - Includes key takeaways and further reading
+  - Is written so the reader actually learns from it
 - Verify completeness — all required features implemented, no gaps
 - Assess code quality — clean, idiomatic, well-structured
 - Check edge case coverage in both implementation and tests
