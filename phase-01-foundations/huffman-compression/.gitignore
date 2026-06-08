@@ -1,0 +1,11 @@
+# Go build artifacts
+/huffman
+*.exe
+*.test
+*.out
+
+# Sample / generated compression files
+*.huf
+
+# Editor / OS noise
+.DS_Store

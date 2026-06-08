@@ -148,3 +148,136 @@ The JSON Parser meets the bar on all four review axes — correctness, completen
 2. Cosmetic: the number railroad ASCII diagram in the README is slightly misaligned — purely visual.
 
 No required changes. Challenge 1 is approved as Done.
+
+---
+
+## Decision: Conventions for Go Code-Bearing Challenges (Layout, Tests, .gitignore)
+
+**Author:** Malcolm (Content Dev) · **Date:** 2026-06-08 · **Status:** Approved
+
+### Context
+
+The earlier "Conventions for Code-Bearing Challenges" decision was derived from
+the Python JSON Parser. Phase 1 Challenge 2 (Huffman Compression) is the first
+**Go** challenge, and Go has its own strong idioms that differ from Python.
+Capturing them now keeps the ~35 Go challenges in the curriculum consistent.
+
+### Decision
+
+#### 1. Module + source layout
+- Each Go challenge is its own module: a `go.mod` at the challenge root with a
+  **short module path equal to the tool slug** (e.g. `module huffman`) and a
+  `go <version>` line matching the toolchain (`go 1.22`).
+- **CLI entry is `main.go` at the challenge root** (`package main`), kept thin:
+  parse subcommands/flags, delegate to packages, map errors to exit codes.
+- **Algorithm/library code lives in `internal/` packages**, split into
+  teaching-sized units with one responsibility each (e.g. `internal/bitio/`,
+  `internal/huffman/`). Use `internal/` so the packages are clearly
+  implementation detail, and name files by role (`tree.go`, `heap.go`,
+  `codec.go`).
+- **Factor out genuinely reusable primitives into their own package** with no
+  knowledge of the surrounding challenge (e.g. `bitio` knows nothing about
+  Huffman) so later challenges can lift them.
+- Prefer the **standard library** (`container/heap`, `encoding/binary`,
+  `bufio`) over hand-rolling; comment the "why", not the obvious "what".
+
+#### 2. Test layout (Go-specific — diverges from Python)
+- Tests live **beside the code** as `*_test.go` in the same package — **NOT** a
+  separate `tests/` folder (that was a Python/pytest convention). This is the Go
+  idiom and lets tests touch unexported helpers.
+- Run with `go test ./...`; static-check with `go vet ./...`. Both must be clean
+  before marking a challenge Done.
+- Keep the **"property/oracle" testing philosophy** from the Python decision: for
+  codecs the oracle is the **lossless round-trip** `decode(encode(x)) == x` over
+  an edge-case-rich corpus, plus a **seeded fuzz loop** for breadth. (The fuzzer
+  caught a real non-determinism bug in Huffman that fixed inputs missed.)
+
+#### 3. CLI + exit codes (unchanged contract)
+- Subcommands (`compress`/`decompress`, with short aliases `c`/`d`) and a small
+  flag parse (`-o output`). Errors to **stderr**.
+- Exit codes stay consistent with the repo: `0` success · `1` domain failure
+  (corrupt/invalid input) · `2` usage/IO error (bad args, missing file).
+
+#### 4. `.gitignore` for Go challenges
+Add a per-challenge `.gitignore` and **never commit build artifacts**:
+```
+/<tool>        # compiled binary (e.g. /huffman)
+*.exe
+*.test
+*.out
+*.<artifact>   # generated outputs, e.g. *.huf for the compressor
+.DS_Store
+```
+
+#### 5. Determinism contract for self-describing binary formats
+When a format stores a *seed* (frequency table, etc.) and both sides must
+reconstruct identical structures: **never let reconstruction depend on Go's
+randomized map iteration order.** Make any tie-break key on stable data (e.g. the
+byte value), not insertion/iteration order. This generalizes to every future
+binary-format challenge (tar, DNS, NTP).
+
+### Consequences
+- Go challenges now have a copy-pasteable skeleton (module, `main.go` + `internal/`,
+  `*_test.go` beside code, `.gitignore`) distinct from the Python skeleton.
+- The bit-I/O package (`internal/bitio`) established here is the reuse target for
+  `tar` (19), `xxd` (15), and the binary network protocols in Phase 4.
+
+---
+
+## Review Verdict — Phase 1 / Challenge 2: Huffman Compression (Go)
+
+**Reviewer:** Ellie
+**Date:** 2026-06-08
+**Path:** `phase-01-foundations/huffman-compression/`
+**Verdict:** ✅ **APPROVED**
+
+---
+
+### Independent verification
+
+| Check | Result |
+|---|---|
+| `go vet ./...` | clean |
+| `go test ./...` | PASS (`internal/bitio`, `internal/huffman`) |
+| CLI round-trip — README.md | 18177 B → 11762 B (ratio 0.647, saved 35.3%); sha256 input == output ✅ |
+| CLI round-trip — empty file | 0 B → 14 B → 0 B, byte-identical ✅ |
+| CLI round-trip — single byte `"A"` | 1 B → 17 B → 1 B, byte-identical ✅ |
+| Bad magic / truncated body | rejected, exit 1 ✅ |
+
+**Exit-code contract verified:** `0` success; `1` domain failure (bad magic,
+truncated body); `2` usage/IO (no args, unknown command, missing input,
+decompress without `-o`, `-o` without value); `--help` → 0. Compression ratio
+output is sane (header overhead on tiny inputs reported honestly).
+
+### Code quality
+- Clean package separation: `bitio` (MSB-first BitWriter/BitReader) is fully
+  Huffman-agnostic and unit-testable; `huffman` splits heap / tree / codec.
+- Comments explain the *why*: zero-padding safety via `totalSymbols`, min-heap
+  rationale, and the determinism contract.
+- Standout correctness detail: deterministic tie-break keyed on byte value
+  (leaves 0–255, internal nodes from 256) so encode and decode rebuild the
+  identical tree despite Go's randomized map iteration order.
+
+### Tests
+Round-trip corpus covers empty, single-byte, single-symbol run, text, repeated
+text, all-256-byte-values, random binary, and newline-heavy input; plus
+prefix-free property, skewed-data shrink check, bad-magic rejection, and a
+seeded 50-iteration fuzz loop. Bit-I/O units cover a 13-bit non-aligned pattern,
+MSB-first `0xB2`, EOF, and empty flush. Coverage is meaningful and edge-complete.
+
+### README (README-first gate)
+**Passes decisively.** All 7 mandated sections present. Teaches entropy and the
+Shannon bound, prefix codes as binary trees, Huffman greedy optimality, the
+header-format trade-off (frequency table vs canonical Huffman vs tree
+serialization, in a table), bit I/O with padding-safety reasoning, the
+map-iteration determinism subtlety, ASCII diagrams, and full run/test
+instructions. A reader genuinely learns the concept.
+
+### Required changes
+None — no blockers.
+
+### Optional non-blocking nice-to-haves
+1. `decompress` requires `-o` while `compress` defaults to `<input>.huf`; could
+   default decompress output by stripping `.huf` for symmetry.
+2. Tiny inputs print `saved -1600.0%`; honest but could add a "(too small to
+   benefit)" hint. README already documents header cost.
