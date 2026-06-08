@@ -38,6 +38,10 @@ Build real-world tools and systems from scratch — guided solutions to [Coding 
 
 Multi-language: Go, Python, Java, TypeScript — pick per challenge
 
+> 📘 **Learning Go?** New to Go from Python? Start with the
+> [Go Quickstart for a Python Developer](docs/go-quickstart.md) — it teaches Go
+> by mapping it to Python using this repo's own Huffman and Bloom-filter code.
+
 ## 📁 Project Structure
 
 > This project uses [Squad CLI](https://github.com/bradygaster/squad) for AI-assisted learning with a domain-specific team of agents.
