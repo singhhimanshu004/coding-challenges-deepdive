@@ -1,0 +1,3 @@
+Pillow>=10.0.0
+# Decoder library used by the round-trip test (skipped automatically if absent).
+pyzbar>=0.1.9
