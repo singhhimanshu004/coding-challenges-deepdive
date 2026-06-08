@@ -72,7 +72,7 @@ For **every** challenge, you write the teaching README *before* the code. This i
 
 | # | Challenge | Diff | Lang | ⏱️ | Why this language / what it teaches | ✅ |
 |---|-----------|------|------|----|-------------------------------------|----|
-| 1 | **JSON Parser** | 🟢 | 🟨 Python | M | Cleanest way to learn a recursive-descent parser end-to-end; expressive string handling lets you focus on grammar, not boilerplate. | [ ] |
+| 1 | **JSON Parser** | 🟢 | 🟨 Python | M | Cleanest way to learn a recursive-descent parser end-to-end; expressive string handling lets you focus on grammar, not boilerplate. | [x] |
 | 2 | **Huffman Compression** | 🔵 | 🟦 Go | M | Greedy tree-building + reading/writing individual *bits*. Go's `bufio`/`io` make a bit-writer natural. | [ ] |
 | 3 | **Bloom Filter Spell Checker** | 🔵 | 🟦 Go | S | Hash functions, bit arrays, and the false-positive/space trade-off. Go's speed makes large dictionaries practical. | [ ] |
 | 4 | **QR Code Generator** | 🔵 | 🟨 Python | L | Reed–Solomon error correction, bit packing, and matrix layout; `numpy`/`Pillow` make the visual output painless. | [ ] |
