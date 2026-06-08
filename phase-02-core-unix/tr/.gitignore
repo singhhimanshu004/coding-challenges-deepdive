@@ -1,0 +1,8 @@
+# Go build artifacts
+/tr
+*.exe
+*.test
+*.out
+
+# Editor / OS noise
+.DS_Store

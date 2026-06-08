@@ -112,3 +112,58 @@ Implemented a Bloom-filter-backed spell checker in `phase-01-foundations/bloom-f
 - Measured FP-rate test: insert 10k, probe 20k absent words, assert observed FP ≤ 3×target (statistical slack). Proves the m/k math, not just plumbing.
 - bitset units (byte-boundary bits 7/8, dup Count, mod wrap, byte sizing); optimal-param spot check; edge cases (single word, empty/invalid n & p rejected, params clamped to ≥1); codec round-trip (identical m/k + byte-identical bits + all words present) + bad-magic/truncated/empty → ErrBadFormat.
 - `go test ./...` + `go vet ./...` clean. Real round-trip verified: known words (apple, receive) → present, gibberish (xyzzyqwert) → MISSPELLED, exit 1. CURRICULUM.md Challenge 3 checkbox ticked.
+
+### 2026-06-09 — Phase 1, Challenge 4: QR Code Generator (Python) — COMPLETE ✅
+Implemented a from-scratch QR encoder in `phase-01-foundations/qr-code-generator/` (no encoder library — Pillow used for pixel output only). Versions 1–10, EC levels L/M/Q/H, byte + numeric + alphanumeric modes, smallest-fitting-version auto-selection.
+
+**The pipeline (the transferable skill: layered encoding with an error-correcting code)**
+- text → mode analysis → smallest fitting version → bit packing (4-bit mode indicator + char-count + payload + terminator + 0xEC/0x11 padding) → split into blocks → Reed–Solomon ECC per block → interleave codewords → matrix layout → masking → BCH format/version info → render.
+- Module split mirrors the JSON-parser convention: package named after the tool (`qrgen/`), one file per stage: `galois.py`, `reedsolomon.py`, `tables.py`, `encode.py`, `matrix.py`, `mask.py`, `generator.py`, `render.py`, `cli.py`, `__main__.py`. `tests/` package + `pytest.ini` (`testpaths = tests`). `.venv/` gitignored; PNGs gitignored.
+
+**GF(256) + Reed–Solomon (the math worth remembering)**
+- GF(256): addition/subtraction = XOR; multiplication = carry-less poly-multiply mod the primitive polynomial 0x11D. Precompute EXP/LOG (antilog/log) tables (doubled EXP to 512 so EXP[i+j] never overflows) → a·b = EXP[LOG[a]+LOG[b]] (slide-rule trick). div/inverse via subtracting exponents mod 255.
+- RS EC codewords = remainder of M(x)·x^n ÷ generator g(x), where g(x)=∏(x−2^i). Implemented as an in-place shift-register long division, O(data×ecc). Generator built by folding (x−2^i) factors.
+- Block interleaving spreads burst damage across blocks (column-major data interleave, then EC interleave).
+
+**Masking + format info**
+- 8 mask predicates XOR'd over data-only modules (function patterns reserved & skipped). 4 penalty rules (runs of 5+, 2×2 blocks, 1:1:3:1:1 finder-lookalikes ×40, dark-ratio deviation); pick lowest score.
+- Format info = BCH(15,5), data = (EC 2-bit field <<3 | mask), remainder via XOR-shift, final XOR 0x5412. NOTE the EC-level field order is non-obvious: L=01, M=00, Q=11, H=10 (NOT L<M<Q<H). Version info (v≥7) = BCH(18,6).
+
+**Validation method (decoder-independent + decoder round-trip)**
+- Reference vectors are the decisive proof: RS matches the Wikiversity "Reed–Solomon codes for coders" canonical QR vector byte-for-byte; encode matches the Thonky "HELLO WORLD" V1-Q data codewords exactly; format-info bit strings match the published table.
+- End-to-end round-trip: render PNG → decode with a 3rd-party decoder → assert original text. Decoder preference: **zbar (pyzbar) is reliable; OpenCV's detector is flaky on tiny v1 symbols** (failed to *locate* valid v1 codes that zbar and phones read fine — a detector limitation, not an encoder bug). On macOS pyzbar needs `brew install zbar`; a `tests/conftest.py` adds /opt/homebrew/lib to the loader path before import; tests skip cleanly if no decoder.
+- 34 pytest tests pass. Verified real PNGs (incl. Unicode payloads) decode back to the original.
+
+**Reuse note:** the `BitBuffer` (MSB-first bit packing) is the sibling of the Huffman bit-writer from Challenge 2 — same bit-packing skill. Phase 1 Challenge 4 is complete; CURRICULUM.md checkbox ticked, README status ✅ Done.
+
+### 2026-06-09 — Go Quickstart guide for Python devs — COMPLETE ✅
+Wrote `docs/go-quickstart.md` (new `docs/` dir): a project-specific Go primer that teaches Go by mapping it to Python, using THIS repo's real code (Huffman + Bloom filter) as running examples — not toy snippets. Purpose: meet Himanshu (Python/Java strong, Go-building) where he is.
+
+**Contents (skimmable, tables + short code blocks):**
+- "Why Go for some challenges" framing tied to the best-fit policy (bit/byte work, perf, bufio).
+- Side-by-side Python↔Go cheat-sheet (vars/zero values, funcs/multi-return, `if err != nil` vs try/except, slices vs lists, maps vs dict incl. comma-ok + the map-determinism bug, structs/methods/interfaces, defer, packages/exported-caps/go.mod, goroutines/channels preview), each pointing to real file:line in our code.
+- Line-by-region walkthrough of `internal/bitio/bitio.go`.
+- "Things that surprise a Pythonista" gotchas (no truthiness, explicit conversions, nil≠None, value vs pointer receivers, caps=visibility, no comprehensions, `:=` vs `var`).
+- Fast-track plan: Tour of Go → re-read our 2 Go programs → 3 exercises against existing code (verbose flag on Bloom CLI, print Huffman code table w/ sorted keys, Bloom `count` subcommand).
+- Run/build/test section (`go run`/`build`/`test ./...`/`vet`/`fmt`) with concrete Huffman + Bloom sessions.
+- Cross-linked from README.md (one-line note under Tech Stack).
+
+**Reuse note:** Future Go challenges should link learners to `docs/go-quickstart.md` in their READMEs instead of re-explaining Go-vs-Python basics. The map-iteration-order determinism lesson is captured there for reuse.
+
+### 2026-06-09 — Phase 2, Wave 1: Six Core Unix Tools (Go) — ✅ APPROVED (Ellie review)
+Built in parallel (5 tools + Go quickstart): **wc** (Challenge 5), **cat** (6), **head** (7), **cut** (8), **uniq** (9), **tr** (10). All in `phase-02-core-unix/{tool}/`. Every tool:
+- `go test ./...` and `go vet ./...` passing
+- Differential spot-checks vs system tools matched byte-for-byte
+- README-first teaching (7 sections, Python analogies, linked to docs/go-quickstart.md)
+- Follows established patterns: `main` → `run()` (injected streams), hand-rolled flags, exit codes 0/1/2
+- All approved by Ellie 2026-06-09; cleared to proceed with Phase 2 Wave 2
+
+**Per-tool status:**
+- **wc**: Streaming byte/line/word/rune counter; proved pure+injectable pattern; `bufio.ReadRune` for UTF-8; exit codes match real `wc` (1 for per-file errors).
+- **cat**: Binary-safe `io.Copy` fast path + line-by-line flag mode; GNU-style continuous numbering across files (intentional BSD divergence noted); `ReadBytes` EOF gotcha documented.
+- **head**: Early termination is the story — instant on huge files; hand-rolled flags beat stdlib; `defer` per-file close (not in loop).
+- **cut**: LIST parser as reusable `Selector` type; membership test (not expansion) gives input order + dedup for free; bytes-vs-runes gotcha for `-c`.
+- **uniq**: Adjacent-only is the headline; "carry one line of state" model; BSD 4-wide count format matched (GNU uses 7-wide).
+- **tr**: Pure filter (no file args) — cleanest pipe-and-filter demo in the phase; rune-based (Unicode first-class); SET expansion (ranges, POSIX classes, escapes); state needed per mode (translate/delete stateless, squeeze carries one rune).
+
+**Verified:** All 6 tools + Go quickstart staged + committed clean (no binaries). CURRICULUM.md checkboxes for challenges 5–10 all ticked.

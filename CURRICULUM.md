@@ -75,7 +75,7 @@ For **every** challenge, you write the teaching README *before* the code. This i
 | 1 | **JSON Parser** | 🟢 | 🟨 Python | M | Cleanest way to learn a recursive-descent parser end-to-end; expressive string handling lets you focus on grammar, not boilerplate. | [x] |
 | 2 | **Huffman Compression** | 🔵 | 🟦 Go | M | Greedy tree-building + reading/writing individual *bits*. Go's `bufio`/`io` make a bit-writer natural. | [x] |
 | 3 | **Bloom Filter Spell Checker** | 🔵 | 🟦 Go | S | Hash functions, bit arrays, and the false-positive/space trade-off. Go's speed makes large dictionaries practical. | [x] |
-| 4 | **QR Code Generator** | 🔵 | 🟨 Python | L | Reed–Solomon error correction, bit packing, and matrix layout; `numpy`/`Pillow` make the visual output painless. | [ ] |
+| 4 | **QR Code Generator** | 🔵 | 🟨 Python | L | Reed–Solomon error correction, bit packing, and matrix layout; `numpy`/`Pillow` make the visual output painless. | [x] |
 
 **🎓 Why Phase 1 is first:** The JSON parser is the single highest-leverage challenge in the whole curriculum — the *exact same* lex→parse→evaluate skeleton reappears in `jq`, `yq`, the Calculator, and the Lisp interpreter. Huffman introduces the bit-level I/O you'll reuse in `tar`, `xxd`, and every binary network protocol. Bloom filters introduce the hashing intuition behind caches and databases.
 
@@ -93,11 +93,11 @@ For **every** challenge, you write the teaching README *before* the code. This i
 | # | Challenge | Diff | Lang | ⏱️ | Why this language / what it teaches | ✅ |
 |---|-----------|------|------|----|-------------------------------------|----|
 | 5 | **wc** (word count) | 🟢 | 🟦 Go | S | The canonical starter: bytes/words/lines, flags, stdin fallback. `bufio.Scanner` is built for it. | [ ] |
-| 6 | **cat** | 🟢 | 🟦 Go | S | Multi-file concatenation & stream forwarding; line numbering flags. | [ ] |
-| 7 | **head** | 🟢 | 🟦 Go | S | Early-termination reads (lines *and* bytes); builds on `wc` patterns. | [ ] |
-| 8 | **cut** | 🟢 | 🟦 Go | S | Field/delimiter parsing *within* a line — column-oriented thinking. | [ ] |
+| 6 | **cat** | 🟢 | 🟦 Go | S | Multi-file concatenation & stream forwarding; line numbering flags. | [x] |
+| 7 | **head** | 🟢 | 🟦 Go | S | Early-termination reads (lines *and* bytes); builds on `wc` patterns. | [x] |
+| 8 | **cut** | 🟢 | 🟦 Go | S | Field/delimiter parsing *within* a line — column-oriented thinking. | [x] |
 | 9 | **uniq** | 🟢 | 🟦 Go | S | Adjacent-duplicate collapse; carrying state across a stream (`-c`, `-d`). | [ ] |
-| 10 | **tr** | 🔵 | 🟦 Go | S | Character translation/deletion/squeeze; rune handling & character classes. | [ ] |
+| 10 | **tr** | 🔵 | 🟦 Go | S | Character translation/deletion/squeeze; rune handling & character classes. | [x] |
 | 11 | **sort** | 🔵 | 🟦 Go | M | Comparators, numeric/reverse/unique sorting, and external sort for big files. | [ ] |
 | 12 | **grep** | 🔵 | 🟦 Go | M | Regex matching, recursive directory walks, context flags (`-A/-B/-C`). | [ ] |
 | 13 | **sed** | 🔵 | 🟦 Go | M | Stream editing: substitution, addressing, in-place edits — a mini command language. | [ ] |
