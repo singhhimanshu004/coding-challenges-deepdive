@@ -1,37 +1,38 @@
 # Decisions Log
 
-## Decision: Learning Curriculum Structure
+## Decision: Learning Curriculum v2 (regenerated)
 
-**Date:** 2026-06-08
-**Author:** Grant (Lead)
-**Status:** Proposed
+**Author:** Grant (Lead) · **Date:** 2026-06-08 · **Model:** claude-opus-4.8 · **Requested by:** Himanshu Singh
 
-### Decision
+### Summary
+`CURRICULUM.md` at the repo root was **regenerated from scratch on claude-opus-4.8** at the user's request. The prior version (a weaker-model draft) was read for reference only; this v2 is a fresh, improved plan and fully overwrites it.
 
-Created `CURRICULUM.md` organizing all 65 challenges into 8 progressive learning phases.
+### What changed vs v1
+- **Honest challenge count:** v1 inflated the list to "65" by inventing a duplicate *Calculator (GUI)*. v2 covers the **64 challenges actually listed in the README** — none dropped, none fabricated.
+- **Difficulty rubric:** added explicit 4-level rubric (🟢 Beginner / 🔵 Intermediate / 🟠 Advanced / 🔴 Expert) and colored ratings per challenge.
+- **Effort estimates:** every challenge now carries an ⏱️ S/M/L/XL estimate.
+- **Dependency rigor:** phase capstones, "skill unlocked" framing, and a pruned dependency graph showing only load-bearing edges.
+- **More learning paths:** added Protocols & Networking and Language & Interpreters paths alongside Sprint/Systems/Full-Stack/Fun-First.
+- **Trackability:** added a progress-at-a-glance table plus per-challenge checkboxes.
 
-### Phases
+### Phase structure (retained 8 phases, counts corrected)
+1. Foundations: Parsing, Encoding & Data Structures (4) — 🟢→🔵
+2. Core Unix: Text Processing (11) — 🟢→🔵
+3. Advanced CLI & Orchestration (7) — 🔵
+4. Networking Fundamentals (7) — 🔵→🟠
+5. Servers & Infrastructure (7) — 🟠→🔴
+6. Applications & Full-Stack (9) — 🔵→🔴
+7. Developer Tools & Internals (6) — 🔵→🔴
+8. Games, Interpreters & Creative (13) — 🟢→🔴
 
-1. **Foundations: Parsing & Data** (4 challenges) — JSON parser, compression, data structures
-2. **Core Unix: Text Processing** (11 challenges) — wc through diff/xxd
-3. **Advanced CLI & Scripting** (7 challenges) — jq, yq, tar, curl, shell
-4. **Networking Fundamentals** (7 challenges) — DNS, NTP, traceroute, port scanner, netcat, proxy
-5. **Servers & Infrastructure** (7 challenges) — web server, load balancer, Redis, Memcached, NATS, Docker
-6. **Applications & Full-Stack** (9 challenges) — URL shortener through Dropbox
-7. **Developer Tools & Internals** (6 challenges) — Git, Redis CLI, load tester, visualizer, extension
-8. **Games, Interpreters & Creative** (14 challenges) — games, Lisp interpreter, bots, API tools
+**Total: 64.**
 
-### Progression Rationale
+### Progression rationale
+Each phase boundary is a capability jump: parse bytes → stream text → orchestrate processes → open sockets → run concurrent servers → build products → build tooling internals → apply creatively. Within phases, challenges introduce one new idea at a time. Key hard orderings preserved: **JSON Parser → jq/Lisp/Calculator**, **wc → … → Shell**, **DNS Resolver → Forwarder**, **Web Server → Load Balancer / URL Shortener**, **Redis Server → Redis CLI**, **curl → networking + Load Tester**, **Spotify Client → Playlist Backup**.
 
-- **Parsing first:** JSON Parser is the foundational skill that unlocks structured-data tools (jq, yq) and protocol parsing (Redis RESP, HTTP, DNS).
-- **CLI before networking:** Stdin/stdout, buffered I/O, and file handling are prerequisites for socket programming.
-- **Networking before servers:** Understanding protocols as a client is simpler than implementing them as a server.
-- **Servers before applications:** Applications build on HTTP server/database patterns established in Phase 5.
-- **Games and interpreters last:** These are self-contained and require varied skills from all prior phases. They serve as capstone projects.
+### Language strategy (unchanged intent, counts corrected)
+Go 35 (CLI/networking/servers/Git), Python 18 (parsing/data/games/interpreters/API), TypeScript 11 (web/real-time/browser/canvas games), Java 0 (first-class alternate, esp. server tier).
 
-### Language Strategy
-
-- Go for systems work (CLI, networking, servers) — 36 challenges
-- Python for data, scripting, games, interpreters — 18 challenges
-- TypeScript for web/full-stack applications — 11 challenges
-- Java available as alternate for any challenge
+### Mandates respected
+- README-first policy enforced for all 64 challenges (8-section teaching structure).
+- Source of truth: project README + codingchallenges.fyi.
