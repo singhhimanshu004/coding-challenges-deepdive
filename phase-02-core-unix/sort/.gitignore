@@ -1,0 +1,12 @@
+# Go build artifacts
+/sort
+/ccsort
+*.exe
+*.test
+*.out
+
+# External-sort scratch files (should never be committed)
+sort-run-*.tmp
+
+# Editor / OS noise
+.DS_Store

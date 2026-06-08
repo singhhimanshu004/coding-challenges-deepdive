@@ -372,3 +372,157 @@ across two Go challenges and should be the default for future Go work.
 - README sample dict counts differ slightly from current macOS dict (illustrative).
 - `check -f` could default the filter path for symmetry with build's `-o` default.
 - Tiny filters report `(0.0 KB)`; could show bytes for sub-KB sizes.
+
+---
+
+## Decision: Phase 2 Challenge 11: sort (Go) — External Merge Sort
+
+**Author:** Malcolm (Content Dev) · **Date:** 2026-06-09 · **Status:** ✅ Done
+
+### What got built
+`phase-02-core-unix/sort/` — a complete Go sort implementation with external merge sort for large files.
+
+Clean separation across files:
+- `args.go` — hand-rolled flag parsing (bundled short flags `-rn`, attached/separated `-k`/`-t`, long flags).
+- `compare.go` — the single shared comparator (key extraction, numeric/text/fold, reverse) + forgiving `leadingNumber` parser.
+- `memsort.go` — in-memory path (`sort.SliceStable`, adjacent dedupe) + line I/O helpers.
+- `external.go` — external merge sort: split → sorted runs on disk → k-way merge via `container/heap`.
+- `main.go` — CLI wiring, path selection, exit codes (0/1/2).
+
+Flags: `-r -n -u -f -k -t` plus teaching knobs `--external` and `--chunk-lines N`.
+
+### Key learnings
+1. **Module name can collide with stdlib import.** Naming the module `sort` made `import "sort"` ambiguous. Fix: module is `ccsort`, binary is `ccsort`. **Rule:** never name a Go module after a stdlib package you import.
+2. **One comparator, both paths.** The strongest correctness guarantee was a test asserting the external path equals the in-memory path across flag combos.
+3. **Stability must be engineered into the k-way merge.** Break heap ties by **run index** (runs are produced in input order, each internally stable).
+4. **Compare against `LC_ALL=C sort`, not plain `sort`.** GNU sort uses locale-aware collation by default.
+5. **External-sort scratch files** are created with `os.CreateTemp(".", "sort-run-*.tmp")` (local, not system temp) and removed via a `defer` that runs even on error.
+
+### Verification
+`go test ./...` and `go vet ./...` pass; output diffs clean against `LC_ALL=C sort` for lexicographic, `-r`, `-n`, `-nr`, `-u`, and a 5000-line numeric file (both in-memory and forced-external paths).
+
+---
+
+## Decision: Phase 2 Challenge 12: grep (Go) — RE2 Pattern Matching
+
+**Author:** Malcolm (Content Dev) · **Date:** 2026-06-09 · **Status:** ✅ Done
+
+### What shipped
+`phase-02-core-unix/grep/` — a from-scratch Go grep with clean four-file split:
+- `matcher.go` — compiles the pattern into a `Matcher` (regex + invert flag).
+- `walker.go` — turns operands into named `Source`s (files / stdin / recursive walk).
+- `output.go` — the reporting engine (counts, file lists, lines, context).
+- `main.go` — argv parsing, wiring, exit codes.
+
+Flags: `-i -v -n -c -w -r -l` plus context `-A/-B/-C`.
+
+### Key learnings
+- **Build flags into the pattern, not the loop.** `-i` → prepend `(?i)`; `-w` → wrap as `\b(?:PATTERN)\b`. The non-capturing group is *essential*.
+- **RE2 is the headline teaching point.** Go's `regexp` is linear-time / no catastrophic backtracking, at the cost of backreferences + lookaround.
+- **Context needs random access.** Read each source fully into `[]string` and merge `[i-B, i+A]` spans (merge on overlap OR touch, gap==0).
+- **`go run` collapses non-zero exit codes to 1** — must build a binary to verify the 0/1/2 contract.
+- **Filename prefix rule:** show `name:` when `recursive || len(fileOperands) > 1`, matching GNU. stdin's display name is `(standard input)`.
+
+### Verification
+`go test ./...` and `go vet ./...` pass; spot-checked against system `grep`. Exit codes verified live: **0** match, **1** no match, **2** bad pattern / dir without -r.
+
+---
+
+## Decision: Phase 2 Challenge 13: sed (Go) — Parser/Executor Interpreter
+
+**Author:** Malcolm (Content Dev) · **Date:** 2026-06-09 · **Status:** ✅ Done
+
+### What shipped
+`phase-02-core-unix/sed/` — a from-scratch Go sed framed explicitly as a tiny interpreter, with clean parser/executor split:
+- `internal/sed/command.go` — data model (`address`, `command`) + the two per-line behaviours: `applies` (addressing + range state machine) and `substitute` (first-vs-global, backref expansion).
+- `internal/sed/parser.go` — `Parse`: hand-written recursive-descent over the script → `[]*command`. Includes `convertReplacement` (sed → Go dialect).
+- `internal/sed/executor.go` — `Run`: the read → execute → auto-print cycle, the pattern space, `-n` suppression, `SplitLines`.
+- `main.go` — `-n`/`-i` flag parsing, stdin/file/in-place wiring, exit codes.
+
+Supports: `s/re/repl/[g][i][p]` with `\1` backrefs + `&`; `p`; `d`; addresses (line N, `$`, `/regex/`) and ranges `addr1,addr2`; `-n`; `-i` in-place.
+
+### Key learnings
+- **sed is the first "tool = language" challenge.** The whole story is parse-once → execute-per-line.
+- **First-vs-global needs hand-rolled replacement.** `regexp.ReplaceAllString` always replaces *all* matches.
+- **Two regex dialects collide — translate at the boundary.** Go is **RE2** (ERE-style), so groups are `(\w+)`, NOT BRE `\(\w+\)`. Replacement backrefs differ too: sed `\1`/`&` vs Go `${1}`/`$0`. `convertReplacement` is the single meeting point.
+- **Ranges are a per-command state machine.** `addr1,addr2` carries an `active` bool *between lines* on the `command` struct.
+- **Addresses match the pattern space, not the original line.** After an `s///` rewrites the pattern space, later commands' `/regex/` addresses see the modified text.
+- **`d` semantics:** clears the line, skips remaining commands, AND suppresses auto-print. One `deleted` bool + `break` handles all three.
+- **Any char can be the `s` delimiter** (`s|/usr|/opt|`). Read the byte after `s` and parse against it; `\<delim>` escapes a literal delimiter.
+
+### Verification
+`go test ./...` and `go vet ./...` pass; differential-checked against system `sed`.
+
+---
+
+## Decision: Phase 2 Challenge 14: diff (Go) — LCS Dynamic Programming
+
+**Author:** Malcolm (Content Dev) · **Date:** 2026-06-09 · **Status:** ✅ Done
+
+### What was built
+The phase capstone for Phase 2: a from-scratch `diff` in Go at `phase-02-core-unix/diff/`. No diff library — the Longest Common Subsequence is computed with a dynamic-programming table and backtracked into an edit script. Supports normal (default), unified (`-u`, `-U n`), and context (`-c`) formats, plus stdin via `-`. Exit codes 0 (identical) / 1 (differs) / 2 (error).
+
+### Design decisions worth reusing
+- **Edit script as the seam.** The algorithm half (`lcs.go` → `editscript.go`) emits one `[]edit` intermediate; the formatting half (`format.go`) consumes it. Three output formats then share a single engine.
+- **Each `edit` carries both 0-based file indices** (`aIndex`, `bIndex`) even when one is unused. This lets the unified/normal formatters compute hunk line ranges directly without re-walking the files.
+- **Tie-break "up before left" in backtracking** (prefer deletion when LCS lengths are equal) reproduces GNU/BSD diff's deletions-before-insertions ordering.
+- **Hunk merging rule** for unified format: cluster changes, pad each with `ctx` context lines, merge clusters whose windows touch/overlap. Default ctx = 3, `-U0` shows none.
+
+### Verification
+Compared `-u` and normal output against system `diff` on a 7-line edit — identical hunk header `@@ -1,7 +1,7 @@`, `+/-/space` prefixes, and `2c2 / 7c7` normal blocks. Tests cover identical, pure insertion, pure deletion, mixed change, empty-vs-nonempty, unified hunk-header correctness, single-line shorthand under `-U0`, and two separate hunks for distant changes.
+
+---
+
+## Decision: Phase 2 Challenge 15: xxd (Go) — Hex Dump + Reverse Parser
+
+**Author:** Malcolm (Content Dev) · **Date:** 2026-06-09 · **Status:** ✅ Done
+
+### What shipped
+Built `xxd` in Go under `phase-02-core-unix/xxd/`: a hex dumper plus a reverse parser, byte-for-byte compatible with system `xxd` for the supported flags. Clean file split — `main.go` (CLI + flag parsing), `dump.go` (forward engine), `reverse.go` (reverse engine).
+
+Flags: `-l` (length), `-c` (cols), `-s` (seek), `-g` (group), `-r` (reverse).
+
+### Learnings worth keeping
+- **xxd line layout, decoded precisely.** `OFFSET: ` then, for each of `cols` slots, a single space at every group boundary plus 2 hex chars (or 2 spaces when the slot is empty), then a **2-space separator**, then the ASCII gutter. The one-vs-two distinction is the key to a robust reverse parser.
+- **`-g 0` means "one group of `cols` bytes"** (no internal spaces) — mirror BSD/GNU.
+- **Reverse parsing strategy:** read the offset before `:`, read hex up to the first double-space run, ignore the ASCII gutter entirely (hex is the source of truth), pad zero bytes to honour offset gaps.
+- **Binary-safe forward path:** read with `io.ReadFull` into a byte buffer, never decode runes. `-s` skip uses `io.CopyN(io.Discard, ...)` so it works on pipes/stdin where Seek is illegal.
+- **Verification gotcha:** `diff <(xxd) <(./xxd)` with a single upstream pipe is a RACE — both process substitutions read the same stdin and one gets nothing. Compare via a temp file or capture each to a variable instead.
+
+### Verification
+`go test ./...` ✅ · `go vet ./...` ✅ · forward output == system `xxd` ✅ · `-r` round-trips all 256 byte values across multiple `-c`/`-g` configs ✅.
+
+---
+
+## Review Verdict — Phase 2 Wave 2 (sort, grep, sed, diff, xxd)
+
+**Reviewer:** Ellie · **Date:** 2026-06-09 · **Verdict:** ✅ ALL FIVE APPROVED — Phase 2 complete.
+
+Every tool: `go vet ./...` clean, `go test ./...` green, and behaviour spot-checked against the system binary. READMEs clear the teaching gate (all sections, Go idioms explained for a Python dev, primer linked).
+
+### sort — ✅ APPROVED
+- **External merge sort is real and works.** split → sort runs → k-way merge via `container/heap`, peak memory O(#runs).
+- `-n/-r/-u/-f` and key fields (`-k`, `-t`) verified. Numeric `-n` matches system sort.
+- Comparator isolated so both paths share identical ordering. Exit codes 0/1/2.
+
+### grep — ✅ APPROVED
+- Regex via RE2 (explained in README, incl. the no-backtracking tradeoff).
+- `-i/-v/-n/-c/-w` all spot-checked correct; `-w` compiles `\b(?:…)\b`.
+- Recursive walk via `filepath.WalkDir` (skips non-regular files); `-r` over a nested dir verified.
+- `-A/-B/-C` context with span-merging + `--` block separators; matches GNU shape.
+- Exit codes verified live: **0** match, **1** no match, **2** bad pattern / dir without -r.
+
+### sed — ✅ APPROVED
+- Clean parser → command-list → executor model (internal/sed package).
+- `s///` with `g`/`i`/`p` flags, `\1..\9` backrefs and `&` whole-match — all verified.
+- Addressing: number, `$`, `/regex/`, and ranges with a correct range state machine; `-n` suppress; `-i` in-place. All spot-checked against system sed.
+
+### diff — ✅ APPROVED
+- **LCS dynamic programming implemented from scratch** (lcs.go), backtracked into an edit script (editscript.go) with GNU's delete-before-insert bias.
+- Unified `@@` hunks **byte-identical to `diff -u`** on change, pure-insert, and pure-delete cases; normal format matches too.
+- Context window merging matches GNU. Exit codes verified: **0** identical, **1** differ, **2** trouble.
+
+### xxd — ✅ APPROVED
+- Forward dump **byte-identical to system xxd** (default and `-c 8`).
+- `-r` reverse **round-trips binary** (500 random bytes) exactly.
+- Binary-safe I/O throughout (`io.ReadFull`, `io.CopyN` for `-s`). Exit codes 0/1/2.

@@ -98,11 +98,11 @@ For **every** challenge, you write the teaching README *before* the code. This i
 | 8 | **cut** | 🟢 | 🟦 Go | S | Field/delimiter parsing *within* a line — column-oriented thinking. | [x] |
 | 9 | **uniq** | 🟢 | 🟦 Go | S | Adjacent-duplicate collapse; carrying state across a stream (`-c`, `-d`). | [ ] |
 | 10 | **tr** | 🔵 | 🟦 Go | S | Character translation/deletion/squeeze; rune handling & character classes. | [x] |
-| 11 | **sort** | 🔵 | 🟦 Go | M | Comparators, numeric/reverse/unique sorting, and external sort for big files. | [ ] |
-| 12 | **grep** | 🔵 | 🟦 Go | M | Regex matching, recursive directory walks, context flags (`-A/-B/-C`). | [ ] |
-| 13 | **sed** | 🔵 | 🟦 Go | M | Stream editing: substitution, addressing, in-place edits — a mini command language. | [ ] |
-| 14 | **diff** | 🔵 | 🟦 Go | M | Longest-common-subsequence / edit distance and the unified-diff format. | [ ] |
-| 15 | **xxd** | 🔵 | 🟦 Go | S | Hex dumps & reverse mode; byte-level formatting bridges you toward binary protocols. | [ ] |
+| 11 | **sort** | 🔵 | 🟦 Go | M | Comparators, numeric/reverse/unique sorting, and external sort for big files. | [x] |
+| 12 | **grep** | 🔵 | 🟦 Go | M | Regex matching, recursive directory walks, context flags (`-A/-B/-C`). | [x] |
+| 13 | **sed** | 🔵 | 🟦 Go | M | Stream editing: substitution, addressing, in-place edits — a mini command language. | [x] |
+| 14 | **diff** | 🔵 | 🟦 Go | M | Longest-common-subsequence / edit distance and the unified-diff format. | [x] |
+| 15 | **xxd** | 🔵 | 🟦 Go | S | Hex dumps & reverse mode; byte-level formatting bridges you toward binary protocols. | [x] |
 
 **🎓 Why Go for the CLI toolkit:** Go compiles to a single dependency-free binary, ships first-class I/O primitives (`bufio`, `io`, `os`), and reflects how modern Unix tools are actually written. You get systems-level discipline without C's footguns. Build these in roughly the listed order — each adds one new idea (multi-file → fields → state → regex → diff algorithms → binary).
 

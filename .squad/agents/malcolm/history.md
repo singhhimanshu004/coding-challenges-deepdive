@@ -167,3 +167,19 @@ Built in parallel (5 tools + Go quickstart): **wc** (Challenge 5), **cat** (6), 
 - **tr**: Pure filter (no file args) — cleanest pipe-and-filter demo in the phase; rune-based (Unicode first-class); SET expansion (ranges, POSIX classes, escapes); state needed per mode (translate/delete stateless, squeeze carries one rune).
 
 **Verified:** All 6 tools + Go quickstart staged + committed clean (no binaries). CURRICULUM.md checkboxes for challenges 5–10 all ticked.
+
+### 2026-06-09 — Phase 2, Wave 2: Five Core Unix Tools (Go) — ✅ APPROVED (Ellie review)
+Built in parallel (5 tools): **sort** (Challenge 11), **grep** (12), **sed** (13), **diff** (14), **xxd** (15). All in `phase-02-core-unix/{tool}/`. Every tool:
+- `go test ./...` and `go vet ./...` passing
+- Differential spot-checks vs system tools matched byte-for-byte
+- README-first teaching (7 sections, Python analogies, linked to docs/go-quickstart.md)
+- Follows established patterns from Wave 1
+
+**Per-tool status:**
+- **sort**: External merge sort is real — split → sort runs on disk → k-way merge via `container/heap`. Peak memory O(#runs). `-n/-r/-u/-f` and key fields verified. **One comparator, both paths** — strongest correctness guarantee. Stability engineered into k-way merge via run-index tie-break. Exit codes 0/1/2. Module name gotcha: named `ccsort` (not `sort`, which collides with stdlib import).
+- **grep**: RE2 pattern matching with clean architecture (matcher / walker / output / main). Flags: `-i/-v/-n/-c/-w/-r/-l` plus context `-A/-B/-C`. Build flags into the pattern (e.g., `-i` → prepend `(?i)`, `-w` → wrap in word-boundary assertions). Context needs random access — read sources fully into `[]string`, merge `[i-B, i+A]` spans. Exit codes 0/1/2 (2 for bad pattern or missing dir without -r).
+- **sed**: First "tool = language" challenge — parse-once → execute-per-line interpreter. Parser/executor split (internal/sed package). Supports `s/re/repl/[g][i][p]` with `\1` backrefs + `&`; `p`; `d`; addresses (line N, `$`, `/regex/`) and ranges; `-n` suppress; `-i` in-place. Critical learning: sed + Go regex dialects collide; translate at the boundary (`convertReplacement` maps sed `\1`/`&` to Go `${1}`/`$0`). Ranges are per-command state machine with an `active` bool carried *between lines*. Addresses match the *pattern space*, not the original line.
+- **diff**: Phase capstone — LCS dynamic programming from scratch. No diff library used. Longest Common Subsequence computed with DP table, backtracked into edit script. Supports normal/unified/context formats, stdin via `-`. Three output formats share a single engine via the edit-script intermediate. Tie-break "up before left" in backtracking reproduces GNU's delete-before-insert bias. Hunk merging: cluster changes, pad with context, merge on overlap/touch.
+- **xxd**: Hex dumper + reverse parser. Binary-safe I/O (`io.ReadFull`, `io.CopyN` for `-s`). Forward/reverse round-trips; supports `-l`, `-c`, `-s`, `-g`, `-r`. Key learning: xxd line layout has a one-space inter-group gap vs two-space pre-gutter separator — critical for robust reverse parsing. `-g 0` means one group of `cols` bytes. Verified: output == system xxd, `-r` round-trips all 256 byte values.
+
+**Phase 2 complete:** 11/11 challenges done (wc, cat, head, cut, uniq, tr, sort, grep, sed, diff, xxd). All approved by Ellie 2026-06-09. CURRICULUM.md checkboxes for challenges 11–15 all ticked.
