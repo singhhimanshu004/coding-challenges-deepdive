@@ -74,7 +74,7 @@ For **every** challenge, you write the teaching README *before* the code. This i
 |---|-----------|------|------|----|-------------------------------------|----|
 | 1 | **JSON Parser** | 🟢 | 🟨 Python | M | Cleanest way to learn a recursive-descent parser end-to-end; expressive string handling lets you focus on grammar, not boilerplate. | [x] |
 | 2 | **Huffman Compression** | 🔵 | 🟦 Go | M | Greedy tree-building + reading/writing individual *bits*. Go's `bufio`/`io` make a bit-writer natural. | [x] |
-| 3 | **Bloom Filter Spell Checker** | 🔵 | 🟦 Go | S | Hash functions, bit arrays, and the false-positive/space trade-off. Go's speed makes large dictionaries practical. | [ ] |
+| 3 | **Bloom Filter Spell Checker** | 🔵 | 🟦 Go | S | Hash functions, bit arrays, and the false-positive/space trade-off. Go's speed makes large dictionaries practical. | [x] |
 | 4 | **QR Code Generator** | 🔵 | 🟨 Python | L | Reed–Solomon error correction, bit packing, and matrix layout; `numpy`/`Pillow` make the visual output painless. | [ ] |
 
 **🎓 Why Phase 1 is first:** The JSON parser is the single highest-leverage challenge in the whole curriculum — the *exact same* lex→parse→evaluate skeleton reappears in `jq`, `yq`, the Calculator, and the Lisp interpreter. Huffman introduces the bit-level I/O you'll reuse in `tar`, `xxd`, and every binary network protocol. Bloom filters introduce the hashing intuition behind caches and databases.

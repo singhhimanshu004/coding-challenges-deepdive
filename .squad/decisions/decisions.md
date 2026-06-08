@@ -281,3 +281,94 @@ None — no blockers.
    default decompress output by stripping `.huf` for symmetry.
 2. Tiny inputs print `saved -1600.0%`; honest but could add a "(too small to
    benefit)" hint. README already documents header cost.
+
+---
+
+## Decision: Bloom Filter Spell Checker — reusable conventions
+
+**Author:** Malcolm (Content Dev) · **Date:** 2026-06-09 · **Challenge:** Phase 1, Challenge 3 — Bloom Filter Spell Checker (Go) — ✅ Done
+
+### Context
+
+Third code-bearing challenge, second in Go. Confirmed and extended the Go
+template established by Huffman (Challenge 2). These conventions are now proven
+across two Go challenges and should be the default for future Go work.
+
+### Reusable conventions
+
+#### Go module + layout (now confirmed twice — treat as the Go standard)
+- `go.mod` with a short module path = tool slug (`module bloom`, `go 1.22`).
+- Thin CLI `main.go` (package `main`) at the challenge root — subcommand parse +
+  flags + I/O only; all logic delegated to `internal/`.
+- One internal package per responsibility, teaching-sized:
+  - `internal/<datastructure>/` for the core algorithm (here `internal/bloom`:
+    bitset + hashing + filter).
+  - `internal/codec/` for serialize/deserialize — a clean, reusable split. The
+    codec depends on the algorithm package, never the reverse.
+- Tests live **beside** the code as `*_test.go` (Go idiom), not in a separate
+  `tests/` dir (that's the Python convention).
+- `testdata/` for sample inputs (Go ignores dirs named `testdata` in builds).
+- `.gitignore` covers the compiled binary (`/bloom`), `*.test`, `*.out`, and the
+  tool's output artifacts (`*.bf`). Never commit build artifacts.
+
+#### Exit-code convention (consistent across Go challenges)
+- `0` success; `1` domain signal (corrupt input / misspelled word found);
+  `2` usage or I/O error (bad args, missing file, empty input).
+- Domain-meaningful exit `1` makes tools scriptable (e.g. `check` returns 1 if
+  any word is flagged → usable in a commit hook).
+
+#### Binary file format convention (extends Huffman's `HUF1` → `BLM1`)
+- 4-byte ASCII magic that encodes name+version (`HUF1`, `BLM1`), a 1-byte
+  version field, then fixed-width **big-endian** params, then payload.
+- **Store every parameter the reader needs to reconstruct behaviour.** For
+  Huffman that's the frequency table; for Bloom it's `m` and `k` (bit positions
+  depend on them). Self-describing files load from nothing but themselves.
+- Include a payload length and validate it (`nbytes == ceil(m/8)`) to detect
+  truncation/corruption → return a sentinel `ErrBadFormat`.
+
+#### Hashing trick worth reusing (caches, dedup, sketches)
+- Kirsch–Mitzenmacher double hashing: synthesise k hashes from two base hashes
+  via `g_i = h1 + i*h2 mod m`. Derive h1/h2 by splitting one 64-bit FNV-1a digest
+  into halves. Guard `h2 != 0`. Use FNV-1a (or another fast non-crypto hash) when
+  you need distribution, not adversary-resistance.
+
+#### Testing convention for probabilistic / property-based structures
+- Assert the hard invariant exactly (Bloom: zero false negatives over thousands
+  of inserts).
+- For statistical properties (observed FP rate), assert a *bound with slack*
+  (≤ 3× target) and `t.Logf` the measured value — never assert an exact rate, or
+  the test flakes.
+- Always include the trivial edge cases: empty, single-element, invalid params.
+
+---
+
+## Review Verdict — Phase 1, Challenge 3: Bloom Filter Spell Checker (Go)
+
+**Reviewer:** Ellie · **Date:** 2026-06-09T01:27:56+05:30 · **Path:** `phase-01-foundations/bloom-filter-spell-checker/` · **Verdict:** ✅ **APPROVED**
+
+### Independent verification
+- `go vet ./...` → clean (exit 0).
+- `go test ./...` → PASS (`internal/bloom`, `internal/codec`).
+- FP test (verbose): target p=0.0100, **observed 0.0089 (178/20000)**.
+- End-to-end on `/usr/share/dict/words` (235,976 words): m=2,261,844 bits
+  (276.1 KB), k=7, estimated FP 0.009736. `receive`→present, `recieve`→MISSPELLED.
+- Exit codes: 0 all-present, 1 misspelling/corrupt-filter, 2 usage/IO — all confirmed.
+  Stdin pipe path works.
+
+### Why it passes
+- **Correctness:** no-false-negatives test (5,000 words, zero tolerance) and a
+  measured FP-rate test near p both pass; round-trip is byte-identical with same m/k.
+- **Completeness:** build + check subcommands, optimal m/k sizing, FNV-1a double
+  hashing with h2==0 guard, self-describing BLM1 codec with truncation check.
+- **Quality:** clean bottom-up layering, `internal/bloom` decoupled from files/CLI,
+  comments explain the *why*.
+- **Docs:** README teaches the concept in depth — one-sided guarantee, full m/k
+  derivation, double hashing, production uses, serialization format, diagrams,
+  run/test instructions. All 7 mandated sections present.
+- **Tests:** all four required (no false negatives, measured FP near p, Save→Load
+  round-trip, edge cases incl. empty/single-word/clamped/corrupt input).
+
+### Non-blocking nice-to-haves
+- README sample dict counts differ slightly from current macOS dict (illustrative).
+- `check -f` could default the filter path for symmetry with build's `-o` default.
+- Tiny filters report `(0.0 KB)`; could show bytes for sub-KB sizes.

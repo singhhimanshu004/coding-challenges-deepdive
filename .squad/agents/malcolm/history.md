@@ -86,3 +86,29 @@ Implemented a lossless Huffman file compressor in `phase-01-foundations/huffman-
 **Edge cases handled:** empty file (no tree), single distinct symbol (depth-0 tree → assign 1-bit code `"0"`, decode replays symbol N times), all-256-byte alphabet, incompressible binary.
 
 **Testing:** round-trip property `Decompress(Compress(x))==x` over empty/single/repeated/text/binary/all-256/newline inputs + seeded 50-iteration fuzzer; bitio unit tests (13-bit non-aligned pattern, `0xB2` MSB ordering, EOF, empty flush); prefix-free assertion; corrupt-magic → `ErrBadFormat`. `go test ./...` + `go vet ./...` clean; verified a real 34 KB file round-trips identically (42.8% saved). CURRICULUM.md Challenge 2 checkbox ticked.
+
+### 2026-06-09 — Phase 1, Challenge 3: Bloom Filter Spell Checker (Go) — COMPLETE ✅
+Implemented a Bloom-filter-backed spell checker in `phase-01-foundations/bloom-filter-spell-checker/`. Reused the Go template from Huffman (Challenge 2): `module bloom`, algorithm in `internal/`, tests beside the code, `.gitignore` for the binary + `*.bf` artifacts.
+
+**Layout**
+- CLI `main.go` (package main) at challenge root — thin: `build` / `check` subcommands, flag parse, file/stdin I/O, exit codes 0/1/2.
+- `internal/bloom/` — `bitset.go` (packed bit array: bit i in byte i/8 at offset i%8; Set/Test mod n; Count via Kernighan popcount), `hash.go` (FNV-1a → double hashing), `bloom.go` (Filter: optimal m/k, Add, Contains, FromParts, EstimatedFalsePositiveRate).
+- `internal/codec/` — `codec.go` (Save/Load the `BLM1` format).
+- `testdata/words.txt` — 40-word sample dictionary for tests.
+
+**Hashing approach (the transferable trick)**
+- Kirsch–Mitzenmacher double hashing: `g_i(x) = h1 + i*h2 mod m` synthesises k hashes from ONE 64-bit FNV-1a digest split into high/low 32-bit halves. No measurable FP-rate penalty vs k real hashes; far cheaper. FNV-1a chosen for being tiny/fast on short strings; non-crypto is fine (need distribution, not adversary-resistance).
+- **Bug guarded against:** if h2==0 every derived hash collapses to h1 (i*0==0) → filter uses a single bit. Force h2 non-zero.
+
+**The Bloom math (memorise)**
+- `m = -(n·ln p)/(ln 2)²` bits; `k = (m/n)·ln 2` hashes. Optimal k keeps the array ~half full (min error). ~9.6 bits/item at p=0.01; +4.8 bits/item per 10× smaller p. Spot check: n=1e6, p=0.01 → m≈9.6M, k=7.
+- One-sided guarantee: NO false negatives ever (Add only sets bits, no delete); false positives at tunable rate p. "Definitely not present" is the trustworthy answer that flags a misspelling.
+
+**Serialization header decision (`BLM1`)**
+- magic(4 "BLM1") + version(1) + m(uint64 BE) + k(uint64 BE) + nbytes(uint64 BE) + packed bits. All ints big-endian. Store m AND k because bit positions depend on them — a reader guessing different values computes wrong indices. nbytes must equal ceil(m/8) → detects truncation/corruption. Load validates magic/version/length → `ErrBadFormat`.
+
+**Testing**
+- Core guarantee test: insert 5000 words, assert EVERY one reports present (zero tolerance for false negatives).
+- Measured FP-rate test: insert 10k, probe 20k absent words, assert observed FP ≤ 3×target (statistical slack). Proves the m/k math, not just plumbing.
+- bitset units (byte-boundary bits 7/8, dup Count, mod wrap, byte sizing); optimal-param spot check; edge cases (single word, empty/invalid n & p rejected, params clamped to ≥1); codec round-trip (identical m/k + byte-identical bits + all words present) + bad-magic/truncated/empty → ErrBadFormat.
+- `go test ./...` + `go vet ./...` clean. Real round-trip verified: known words (apple, receive) → present, gibberish (xyzzyqwert) → MISSPELLED, exit 1. CURRICULUM.md Challenge 3 checkbox ticked.

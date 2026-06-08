@@ -1,0 +1,11 @@
+# Go build artifacts
+/bloom
+*.exe
+*.test
+*.out
+
+# Generated/serialized Bloom filters
+*.bf
+
+# Editor / OS noise
+.DS_Store

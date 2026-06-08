@@ -70,3 +70,42 @@
 - Single-byte/tiny inputs print `saved -1600.0%`; honest but could be softened
   with a "(file too small to benefit)" note. README already explains header cost.
 - Verdict written to `.squad/decisions/inbox/ellie-huffman-review.md`.
+
+### 2026-06-09 — Review: Phase 1 / Challenge 3 — Bloom Filter Spell Checker (`phase-01-foundations/bloom-filter-spell-checker/`)
+
+**Verdict: ✅ APPROVED.**
+
+- Independently ran `go vet ./...` → clean (exit 0), and `go test ./...` → both
+  packages (`internal/bloom`, `internal/codec`) pass.
+- Verbose FP test: target p=0.0100, **observed FP rate=0.0089 (178/20000)** — the
+  m/k math is right, not just the plumbing. No-false-negatives test inserts 5,000
+  words and confirms every one reports present (zero tolerance).
+- Real end-to-end run on system dictionary `/usr/share/dict/words` (235,976 words):
+  `m = 2,261,844 bits (276.1 KB), k = 7, estimated FP 0.009736` — sane and matches
+  README's illustrative numbers closely. `receive`/`definitely` → probably present;
+  `recieve`/`definately` → MISSPELLED. Small testdata dict (40 words) also correct.
+- Exit-code contract verified: 0 = all words present; 1 = ≥1 word flagged OR corrupt
+  filter (bad magic → `ErrBadFormat`); 2 = usage/IO (no args → usage, missing file).
+  Stdin path (`tr ' ' '\n' | check`) works.
+- Code quality: clean bottom-up layering (BitSet → hashing → Filter → codec → CLI),
+  `internal/bloom` has zero file/CLI knowledge. Standouts: packed bitset with
+  Kernighan popcount; Kirsch–Mitzenmacher double hashing from one FNV-1a split into
+  hi/lo 32 bits, with the **h2==0 guard** (else all derived hashes collapse to h1);
+  self-describing `BLM1` header storing m/k so lookups are reproducible, with
+  `nbytes == ceil(m/8)` truncation check. Comments explain the *why* throughout.
+- Tests cover all four mandated properties: no-false-negatives proof, measured FP
+  near p, Save→Load round-trip (byte-identical bits + same m/k), and edge cases
+  (single word, n=0 / p≤0 / p≥1 rejected, clamped params, bad magic/truncated/empty).
+- README clears the README-first gate decisively: all 7 sections, what a Bloom
+  filter is, one-sided guarantee (no false negatives / possible false positives),
+  full m/k derivation from n and p (incl. P(bit=0)≈e^(-kn/m) intuition), double
+  hashing, production uses (Cassandra/RocksDB/Chrome/Bitcoin SPV), BLM1 serialization
+  format, ASCII diagrams, run/test instructions. Reader genuinely learns.
+
+**Non-blocking nice-to-haves:**
+- README sample output (line 27–28: 235886 words, 276.0 KB) differs slightly from
+  the current macOS dict (235976 words, 276.1 KB) — illustrative, not a defect.
+- `check -f` could default the filter path (e.g. `<wordlist>.bf`) for symmetry with
+  build's default output, but the explicit flag is fine.
+- Tiny filters print `m = ... (0.0 KB)`; honest but could show bytes for sub-KB.
+- Verdict written to `.squad/decisions/inbox/ellie-bloom-filter-review.md`.
