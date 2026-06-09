@@ -1,0 +1,11 @@
+# Go build artifacts
+/curl
+*.exe
+*.test
+*.out
+
+# Downloaded output files from -o during manual testing
+*.download
+
+# Editor / OS noise
+.DS_Store

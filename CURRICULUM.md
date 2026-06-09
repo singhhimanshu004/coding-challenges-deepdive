@@ -124,7 +124,7 @@ For **every** challenge, you write the teaching README *before* the code. This i
 | 18 | **xargs** | 🔵 | 🟦 Go | M | Batching stdin into argv, spawning processes, and bounded parallelism. | [x] |
 | 19 | **tar** | 🔵 | 🟦 Go | M | Binary header parsing & file metadata — directly extends Phase 1's bit/byte skills. | [ ] |
 | 20 | **crontab** | 🔵 | 🟦 Go | M | Cron-expression parsing and time-based scheduling logic. | [ ] |
-| 21 | **curl** | 🔵→🟠 | 🟦 Go | L | An HTTP/1.1 client from raw TCP: request framing, headers, chunked encoding, TLS. The bridge into networking. | [ ] |
+| 21 | **curl** | 🔵→🟠 | 🟦 Go | L | An HTTP/1.1 client from raw TCP: request framing, headers, chunked encoding, TLS. The bridge into networking. | [x] |
 | 22 | **Shell** | 🟠 | 🟦 Go | L | The orchestrator: tokenizing input, `fork/exec`, pipes, redirects, built-ins, `PATH` resolution, job basics. | [ ] |
 
 **🎓 Why the Shell comes last here:** A shell is the *conductor* of every Unix tool you just built. Implementing it after the individual tools makes pipes, redirects, and process lifecycles click — you finally see what `cmd1 | cmd2 > file` is doing under the hood. `curl` is placed immediately before networking on purpose: it's your first real protocol client and the natural on-ramp to Phase 4.
