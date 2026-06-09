@@ -197,3 +197,54 @@ Built in parallel (5 tools): **jq** (Challenge 16, Go), **yq** (17, Python), **x
 
 **Phase 3 Wave 1 complete:** 5/7 challenges done (jq, yq, xargs, tar, crontab). curl & shell (wave 2) not yet started. All approved by Ellie 2026-06-09. CURRICULUM.md checkboxes for challenges 16–20 all ticked.
 
+### 2026-06-09 — Phase 3, Wave 2: curl + Shell capstone (Go) — ✅ APPROVED (Ellie review)
+
+Built the final two challenges of Phase 3: **curl** (Challenge 21, Go), **Shell/gosh** (22, Go capstone). Both in `phase-03-advanced-cli/{tool}/`.
+
+**curl (Challenge 21):**
+- **Raw-socket HTTP/1.1 client:** `net.Dial` opens byte-pipe; `crypto/tls.Client` for https. No net/http for protocol — request framed by hand, response parsed by hand.
+- **Flags:** `-X METHOD`, `-H` (repeatable, override defaults), `-d DATA` (→ POST), `-o FILE`, `-I` (HEAD), `-v` (verbose), `-L` (follow 3xx, capped 10).
+- **Body framing (the teaching payload):** Two schemes — `Content-Length` (exact read) AND `Transfer-Encoding: chunked` (hand-written decoder). Chunked decoder unit-tested hard: hex sizes, `;ext` stripped, per-chunk CRLF consumed, 0-chunk + trailer drained. Read-to-EOF fallback (valid because we send `Connection: close`).
+- **File split:** `url.go` (parse + redirect resolution), `conn.go` (dial/TLS), `request.go` (framer), `response.go` (parser + chunked decoder), `main.go` (CLI/redirect loop).
+- **Layout:** Same Go pattern (thin main → testable run), injected streams, hand-rolled flags, exit codes 0/1/2. `.gitignore` ignores `/curl` binary.
+- **README-first:** 326 lines, teaches socket→bytes→HTTP from first principles, byte-by-byte request/response diagrams, ASCII chunked format diagram, TLS in one paragraph, links go-quickstart.md. Already documents the CGO_ENABLED=0 workaround (no doc gap).
+- **Verification:** `go vet` clean; `CGO_ENABLED=0 go test ./...` → 30 pass (unit + 3 e2e over local `net.Listener`). Live network: `-I example.com` → 200; `-v example.com https` → TLS + chunked; `-L github.com` → redirect chain; `-o file` saved body. Approved.
+
+**⚠️ Toolchain note for repo-wide future use:**
+- On macOS, `go test ./...` aborts with `dyld: missing LC_UUID load command / signal: abort trap` for packages importing `net`/`crypto/tls` (cgo system resolver → external linker ↔ Xcode CLT mismatch). NOT a code bug.
+- **Fix: `CGO_ENABLED=0 go test ./...`** — pure-Go linker + native resolver. `go vet` and `go build` unaffected.
+- **Phase 4+ networking challenges (web server, proxy, etc.) will hit this — default to `CGO_ENABLED=0` for test runs.** Curl README documents this; future challenges should reference that documentation.
+
+**Shell/gosh (Challenge 22, Phase 3 capstone):**
+- **Working interactive Unix shell:** Tokenizer → recursive-descent parser → pipeline AST → fork/exec executor wiring real pipes/redirects.
+- **Features:** quotes (single/double) + backslash escapes; pipelines `|`; redirections `>`, `>>`, `<`, `2>`; sequencing `;`; logical `&&`/`||`; env expansion `$VAR`/`${VAR}`/`$?`/`$$`; builtins `cd`/`pwd`/`exit`/`echo`/`export`/`type`; Ctrl-C swallows at shell (child dies), interactive REPL + `-c "cmd"` + script-file modes.
+- **AST shape:** `List(;) → AndOr(&&/||) → Pipeline(|) → Command(args+redirs)` — grammar nesting encodes precedence (`;` loosest, redirs tightest).
+- **File split:** `lexer.go` (tokenize + quote/escape/operator recognition), `parser.go` (recursive-descent → AST), `executor.go` (fork/exec + fd wiring), `expand.go` (`$VAR` expansion), `builtins.go` (in-process commands), `repl.go` (interactive loop + SIGINT handler), `main.go` (mode select). All under `internal/shell/` for testability without TTY.
+
+**Hard-won reusable lessons (process-spawning patterns):**
+1. **#1 pipe hang bug: parent must CLOSE its pipe-fd copies after starting children.** Each exec dups fd into child; if parent keeps write-end open reader never sees EOF and hangs forever. Solution: explicit "ownership rule" — every pipe-end used by exactly one stage. External stages → parent closes after `Start()`, builtin stages (goroutine) → goroutine closes own. Comments in `execMulti` + `parentCloses` explain this critical pattern.
+2. **`cd` MUST be a builtin** — working directory is per-process state; child `cd` changes its own dir then exits, parent unmoved. Same for `exit`/`export`/assignment (all mutate shell state). README has prominent section with the "why".
+3. **fork/exec as two-step with gap:** `cmd.Start()` ≈ fork (returns immediately), `cmd.Wait()` ≈ wait; the gap is where you rewire fds via `cmd.Stdin/Stdout/Stderr =` assignment.
+4. **Lexer word-part coalescing gotcha:** unquoted chars must coalesce into one expandable word-part, else `$MYVAR` tokenizes as separate `$` + `M` + `Y` + `A` + `R` tokens and the `$` never sees the name. Store words as `[]wordPart{text, expand}` so quoting context (single-quote=literal, double/unquoted=expandable) survives to expansion stage. Caught via failing `export`/`$?` test.
+5. **Glued operators** (`2>file`, `a"b"c`): detect word exactly matching `"2"` immediately before `>` to emit stderr-redirect token.
+6. **SIGINT model:** shell + foreground child share process group → both get SIGINT; shell installs handler that swallows it (reprints prompt) while child dies by default. Simple, matches bash feel.
+
+**Init-cycle gotcha (Go dispatch-table pattern):**
+- `var builtins = map{...}` literal whose funcs call `isBuiltin` (reads the map) is a compile-time initialization cycle. Fix: populate the map in `init()` instead. Pattern reusable for any dispatch-table-with-self-reference.
+
+**Layout:** Same Go pattern (internal/shell injected-streams package, thin main.go mode-selector, testable via `bytes.Buffer`). README-first: 297 lines, fd-level `cmd1 | cmd2 > file` pipeline diagram, dedicated "Why `cd` must be a builtin" section, EOF/parent-close hang trap, Python analogies (Popen≈Start), links go-quickstart.md.
+
+**Verification:** `go vet` clean; `go test ./...` → 33 pass (tokenizer/parser/expand/executor/builtins + REAL execution tests). Manually: `cd`+`pwd` works; `echo a b | cat | wc -w` → 2; redirect+readback; `false ; echo $?` → 1; `true ; echo $?` → 0; `type cd/ls` resolves; export + `$HOME` expansion correct. All correct.
+
+**Scope boundaries (documented in README):**
+- No job control (`&` background, `fg`/`bg`), no globbing, no command substitution `$(...)`, no here-docs. `2>>` treated as `2>` (overwrite) — deliberate, documented.
+- Expansion does not re-split on spaces — one arg stays one arg.
+
+**Teaching angles:**
+1. The orchestrator that runs every other Phase 2 tool — capstone tying everything together.
+2. The pipe EOF hang and parent fd-close ownership rule — critical for any multi-process code.
+3. Why `cd` must be a builtin — process-state-mutation insight.
+4. fork/exec as two-step with a fd-rewiring gap.
+
+**Status:** ✅ Approved by Ellie 2026-06-09. **Phase 3 (Advanced CLI) COMPLETE — 22/22 challenges done.** CURRICULUM.md checkboxes for challenges 21–22 all ticked.
+

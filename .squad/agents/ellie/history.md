@@ -109,3 +109,145 @@
   build's default output, but the explicit flag is fine.
 - Tiny filters print `m = ... (0.0 KB)`; honest but could show bytes for sub-KB.
 - Verdict written to `.squad/decisions/inbox/ellie-bloom-filter-review.md`.
+
+### 2026-06-09 — Review: Phase 1 / Challenge 4 — QR Code Generator (`phase-01-foundations/qr-code-generator/`)
+
+**Verdict: ✅ APPROVED.**
+
+- Independently ran `./.venv/bin/python -m pytest -q` → **34 passed** (twice, clean).
+  Round-trip tests genuinely execute (not skipped): venv has both `pyzbar`+zbar
+  and `opencv-python-headless`; all 5 decode cases pass.
+- **Real CLI generation + independent decode** (all exact): `qrgen "HELLO WORLD"
+  -o` → zbar `HELLO WORLD`; byte-mode URL `https://github.com`; numeric `8675309`
+  decoded by **both** zbar and OpenCV; stdin pipe; half-block Unicode + `--ascii`
+  renders correct.
+- **Exercised the version ≥ 7 path** beyond the bundled v1–4 cases: `A`×220 →
+  version 7 (45×45), triggering BCH(18,6) version-info stamping — zbar decodes it
+  back exactly. Confirms `write_version_info` is correct.
+- From-scratch confirmed: Pillow paints pixels from *our* grid only; no encoder
+  library. GF(256) (doubled EXP table, slide-rule mul), RS LFSR long division
+  (matches Wikiversity vector), encode pipeline (matches Thonky HELLO WORLD V1-Q
+  codewords), zig-zag placement, 8 masks + 4 penalty rules, BCH format/version
+  info — all hand-rolled and well-commented on the *why*.
+- Tests: 4 ground-truth layers (GF axioms over all 255 nonzero, RS reference, encode
+  reference, decode round-trip) + structural invariants + edge cases (empty,
+  max-capacity, oversized-raises).
+- README clears the teaching gate decisively: all 7 sections, symbol anatomy
+  diagram, encoding modes, RS over GF(256) **with the math** + syndrome/decode
+  explanation, interleaving rationale, masking + all 4 penalty rules, pipeline
+  diagram, run/test instructions w/ macOS zbar caveat.
+
+**Non-blocking nice-to-haves:**
+- `choose_best_mask` scores penalties without temporarily writing format-info bits
+  (inline comment implies it does). Negligible effect — every decoder still reads
+  the symbol — but comment is slightly misleading.
+- Rule-1 docstring says `3 + run−5`; code uses equivalent `run − 2` (behavior right).
+- `--scale` lacks a `>0` guard (`--scale 0` → 0-dim image).
+- Verdict written to `.squad/decisions/inbox/ellie-qr-code-review.md`.
+
+### 2026-06-09 — Review: Phase 2 Wave 1 — wc, cat, head, cut, uniq, tr (`phase-02-core-unix/`)
+
+**Verdict: ✅ ALL SIX APPROVED.**
+
+- Independently ran `go vet ./...` + `go test ./...` per tool → all clean
+  (tr's tests live in `internal/translate`; `?` no-test on the thin main pkg).
+- REAL differential spot-checks vs the system binaries, all matching:
+  - **wc**: counts `3 7 33`, `-l/-w/-c/-m` (runes, `é`=1), stdin pipe, multi-file
+    `total`. (Cosmetic: narrower column padding than system; counts identical.)
+  - **cat**: byte-identical concat, `-n` continuous, `-b` non-blank override,
+    `-E`, `-`/stdin interleave, 2 KB binary round-trip. GNU continuous numbering
+    deviation is documented (README "Compatibility note") — acceptable.
+  - **head**: `-n`/`-c`, `-n5` glued, `==> file <==` headers, N>file, stdin —
+    all match; early-termination real (`headLines` stop, `io.CopyN`).
+  - **cut**: `-f` lists/ranges/open/`-3`, `-d`, default TAB, `-c` + Unicode,
+    no-delim passthrough, `-s`, input-order `-f3,1` — all match.
+  - **uniq**: plain, `-c` (BSD 4-wide, matches macOS), `-d`, `-u`, adjacency,
+    `sort|uniq` — all match. (Missing-file exit 2 vs GNU 1 = repo convention.)
+  - **tr**: translate, `-d`, `-s`, `-cd`, SET2 padding (`abcde`→`xyyyy`),
+    `[:upper:]`→`[:lower:]`, multibyte `é`→`e`, `-s ' '` — all match.
+- Code quality high across the board: tiny `main`→`run` split for testability,
+  hand-rolled parsers (bundling, `--`, `-`/stdin), buffered streaming, rune-aware
+  Unicode, `defer` flush. cut factors a reusable LIST grammar; tr compiles a
+  Spec→Transformer with correct per-mode squeeze-set selection.
+- READMEs clear the teaching gate: all 7 mandated sections, Go idioms explained
+  for a Python dev (bufio, runes, interfaces, defer, zero value, iota), each
+  links `docs/go-quickstart.md`.
+- Non-blocking nice-to-haves: wc padding width; uniq exit-code 2 vs 1; add
+  CLI-layer tests for tr's `main.go` flag parsing.
+- Verdicts written to `.squad/decisions/inbox/ellie-phase2-wave1-review.md`.
+
+### 2026-06-09 — Review: Phase 2 Wave 2 — sort, grep, sed, diff, xxd (`phase-02-core-unix/`)
+
+**Verdict: ✅ ALL FIVE APPROVED — Phase 2 complete.**
+
+- Per tool: `go vet ./...` clean + `go test ./...` green; differential
+  spot-checks vs the system binary.
+- **sort:** external merge sort genuinely exercised — `TestExternalSortForced`
+  (`--chunk-lines 4` → ~13 runs through the k-way `container/heap` merge),
+  `TestExternalMatchesInMemory` proves both paths agree across `{} -r -n -u -f
+  -fu`, `TestExternalUnique` collapses cross-run dupes. Heap `Less` tie-breaks by
+  run index → stable, matches in-memory `SliceStable`. `-n` matches system sort.
+- **grep:** RE2 regex; `-i/-v/-n/-c/-w` correct (`-w`=`\b(?:…)\b`); `-r` via
+  `filepath.WalkDir`; `-A/-B/-C` span-merge + `--`. Exit codes live-verified
+  0/1/2 (bad pattern & dir-without-`-r` → 2).
+- **sed:** parser→command-list→executor; `s///` g/i/p + `\1..\9` + `&`;
+  addressing N/`$`/`/re/`/ranges with state machine; `-n`, `-i` (preserves mode).
+  Documents RE2/ERE `(…)` vs BRE `\(…\)` — BRE scripts intentionally won't match.
+- **diff:** LCS DP **from scratch** → edit script (GNU delete-before-insert
+  bias). Unified `@@` hunks **byte-identical to `diff -u`** incl. pure-insert
+  (`-l,0`) & pure-delete; normal format matches. Exit 0/1/2.
+- **xxd:** forward dump **byte-identical to system xxd** (default & `-c 8`); `-r`
+  **binary round-trip exact** (500 random bytes), cross-tool reverse + offset
+  zero-pad verified. Binary-safe (`io.ReadFull`/`io.CopyN`).
+- READMEs clear the teaching gate; primer linked twice each.
+- Non-blocking: sed README "🐍→🐹" mojibake on some terminals; sed lacks `s///N`;
+  diff drops mtime (deliberate); xxd no `-u`/`-p`. None block.
+- Verdicts written to `.squad/decisions/inbox/ellie-phase2-wave2-review.md`.
+
+### 2026-06-09 — Review: Phase 3 Wave 1 — jq, yq, xargs, tar, crontab (`phase-03-advanced-cli/`)
+
+**Verdict: ✅ ALL FIVE APPROVED — Phase 3 Wave 1 complete.**
+
+- Per challenge: Go `go vet ./...` + `go test ./...` green; yq via its `.venv`
+  pytest (**54 passed**). Plus real behavioral spot-checks; differential/interop
+  for jq and tar.
+- **jq (Go):** 44 tests. DIFFERENTIAL vs system jq 1.7.1 — every case
+  byte-identical: `.foo`, `.addr.city`, `.[]`, `keys`, `map(select(.age>25))`,
+  `.[]|.age`, `.a+.b`, comma, `[.[]|.*2]`, `.[-1]`, `has`, `select`, `.foo?`,
+  rune-aware `length`, `not`, nested pipe+select. Clean lex→parse→eval, correct
+  precedence grammar, cartesian binary ops, jq total-ordering compare, `try`
+  swallows to empty. Documented divergence: `values` = object values (not jq's
+  null-filter). README gate cleared, go-quickstart ×2.
+- **yq (Python):** loader(safe_load_all)/query(lexer→parser→generator
+  value-stream)/convert/cli. Verified anchors&aliases (shared value), multidoc
+  `---`, YAML↔JSON both ways, `.tags[]`, `keys`. Deliberate query subset
+  (identity/field/index/iterate/pipe/length/keys) — matches data-model framing.
+  README thorough, Python (no primer needed).
+- **xargs (Go):** 18 tests incl. real bounded-parallelism. Matches system xargs
+  on batching, `-n2`, `-I {}`, `-0`. **-P VERIFIED REAL:** 4×0.5s sleeps under
+  `-P4` → 0.51s; `-P2` → exactly 2 concurrent starts. Exit propagation verified:
+  `false`→123, missing cmd→127. Semaphore(buffered chan)+WaitGroup pool correct.
+  Non-blocking: whitespace-only tokenizer (no shell quoting).
+- **tar (Go):** 9 tests. **INTEROP CONFIRMED BOTH WAYS** with system tar:
+  mytar→`tar -tf`/`-xf` byte-identical (`diff -r` clean); system tar→mytar
+  `-t`/`-x` byte-identical. **Traversal guard verified with a real Python-built
+  malicious tar** (`../escape.txt` refused, nothing leaked); absolute paths too.
+  Correct USTAR octal/checksum-with-spaces/prefix split/2-zero terminator/CopyN.
+  Non-blocking: no `-C`, files+dirs only.
+- **crontab (Go):** 29 tests. Real next-run all correct incl. **dom/dow OR rule**
+  (`0 0 13 * 5` → Fridays AND the 13th), year rollover (`59 23 31 12 *`),
+  step-dow `0/2`, named `jan-mar mon`, macros, impossible `0 0 30 2 *`→exit 2.
+  Bitset-per-field + big-jump search w/ `time.Date` rollover. README gate cleared.
+- Non-blocking nits noted (none gate): jq `values` divergence (documented);
+  yq multi-scalar doc-stream output; xargs tokenizer quoting; tar `-C`/symlinks;
+  crontab `-explain` minute-vs-hour formatting.
+- Verdicts written to `.squad/decisions/inbox/ellie-phase3-wave1-review.md`.
+
+### 2026-06-09 — Review: Phase 3 Wave 2 — curl + Shell capstone (Go) — ✅✅ BOTH APPROVED
+
+**Verdict: Phase 3 COMPLETE.**
+
+- **curl** (`phase-03-advanced-cli/curl/`) — ✅ APPROVED. `go vet` clean; `CGO_ENABLED=0 go test ./...` → 30 pass (incl. 3 e2e). Raw TCP (`net.Dial`+`tls.Client`), NOT net/http for the protocol. Verified request framing (Host, CRLFs, Content-Length, Connection: close), response parser, and the chunked decoder (hex sizes, `;ext`, per-chunk CRLF, 0-chunk+trailer) + Content-Length (`io.ReadFull`) + EOF fallback. Flags `-X/-H/-d/-o/-I/-v/-L` + redirect loop (cap 10, 301/302/303→GET, 307/308 preserve). README (326 lines) teaches socket→HTTP and ALREADY documents the `CGO_ENABLED=0` LC_UUID toolchain workaround — no doc gap.
+- **Shell/gosh** (`phase-03-advanced-cli/shell/`) — ✅ APPROVED. `go vet` clean; `go test ./...` → 33 pass. Hand-drove binary: 2-stage pipe, redirect+readback, cd→pwd, `$?` after failure, `&&`/`||`, quote semantics — all correct. Tokenizer (quotes/escapes), recursive-descent parser, executor (os.Pipe N-stage + the parent-fd-close-for-EOF rule), in-process builtins (cd/pwd/exit/echo/export/type), `$VAR/${VAR}/$?/$$` expansion, SIGINT swallow. README (297 lines) has the fd pipeline diagram + "why cd must be a builtin" section + go-quickstart link.
+- **Non-blocking nits:** shell `2>>` treated as `2>` (documented); no post-expansion word-splitting/globbing (reasonable scope cut). Neither blocks approval.
+- **Reusable learning:** go1.22.2 darwin/arm64 cgo external-linker LC_UUID abort affects any Go binary importing net/crypto/tls at test load — verify such challenges with `CGO_ENABLED=0 go test`; it is NOT a code failure.

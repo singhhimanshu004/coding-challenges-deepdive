@@ -133,3 +133,77 @@ All six tools built in parallel, reviewed 2026-06-09 by Ellie, all **approved**.
 - **Verified:** `go vet ./...` clean; `go test ./...` passes (20+ cases incl. empty input); differential-tested against system `/usr/bin/tr` for 12 cases (lower→upper, positional translate, delete digits, squeeze, targeted squeeze, `-cd`, `-c` translate, `[:upper:]`→`[:lower:]`, translate+squeeze, short-SET2 padding, range mapping, space-class delete) — all matched byte-for-byte
 - **Nice-to-have:** add CLI-layer tests for `main.go` flag parsing (translate engine thoroughly covered; this is round-out). Non-blocking.
 - **Status:** ✅ Done
+
+## Phase 3, Wave 2: curl + Shell capstone (Go) — ✅ APPROVED (Phase 3 complete)
+
+### Challenge 21 — curl — ✅ APPROVED
+
+**What:** Raw-socket HTTP/1.1 client in Go at `phase-03-advanced-cli/curl/` — request framed by hand, response parsed by hand (including chunked decoding). NOT net/http for the protocol.
+
+**Implementation:**
+- **Raw TCP + TLS:** `net.Dial` opens the byte-pipe; `crypto/tls.Client` for https (stdlib handshake, everything above TLS is hand-rolled).
+- **Flags:** `-X METHOD`, `-H 'Name: val'` (repeatable, overrides defaults), `-d DATA` (→ POST + Content-Length), `-o FILE`, `-I` (HEAD/headers-only), `-v` (verbose `>`/`<` to stderr), `-L` (follow 3xx redirects, capped 10).
+- **Body framing — two schemes:** `Content-Length` (exact read via `io.ReadFull`) AND `Transfer-Encoding: chunked` (hand-written decoder: hex sizes, `;ext` stripped, per-chunk CRLF consumed, 0-chunk + trailer drained), with read-to-EOF fallback (valid because we send `Connection: close`).
+- **File split:** `url.go` (parse + redirect resolution), `conn.go` (dial/TLS), `request.go` (framer), `response.go` (parser + chunked decoder), `main.go` (CLI/redirect loop).
+
+**Reusable conventions:**
+- Same Go layout: `module curl` / `go 1.22`, thin `main()` → testable `run(args, stdout, stderr) int`; flat well-named files, no `internal/`; `.gitignore` ignores `/curl`, `*.test`, `*.out`, `.DS_Store`.
+- Hand-rolled flag parser (not stdlib `flag`) for authentic curl ergonomics (short flags, repeatable `-H`).
+- Three-way exit codes: 0 success / 1 runtime / 2 usage.
+- Dependency-injected I/O for tests: parser takes `*bufio.Reader`; `run` takes output streams. Tests use `strings.Reader` fixtures + local `net.Listener` — zero internet dependency.
+- README-first: links `docs/go-quickstart.md`, byte-by-byte annotated request/response, ASCII chunked-format diagram, TLS in one paragraph.
+
+**Teaching angles:**
+1. **"A socket is just a byte pipe; HTTP is just text on it."** Demystifies networking.
+2. **`\r\n` everywhere + blank line = end of headers.** The two beginner mistakes.
+3. **Two body-framing schemes, not one.** Chunked decoder is the star: sizes are HEX, `0`-chunk terminates, each chunk's data has trailing CRLF (off-by-two bug magnet).
+4. **TLS as a clean wrapper** — HTTP code is byte-identical for http/https.
+
+**⚠️ Toolchain note (repo-wide for Phase 4+):**
+- On macOS, **`go test ./...` aborts with `dyld: missing LC_UUID` error** for packages importing `net`/`crypto/tls` (cgo system resolver → external linker mismatch with Xcode CLT). NOT a code bug.
+- **Fix: `CGO_ENABLED=0 go test ./...`** — pure-Go linker + native resolver. `go vet` and `go build` are fine either way.
+- Future networking challenges (Phase 4+) will hit this — **default to `CGO_ENABLED=0` for test runs.** Documented in curl README; applies to web server, proxy, etc.
+
+**Verification:** `go vet` clean; `CGO_ENABLED=0 go test ./...` — 30 pass (unit + e2e over local `net.Listener`). Live network: `-I http://example.com` → 200; `-v https://example.com` → TLS + chunked decoded; `-L http://github.com` → http→https redirect followed; `-o file` saved body.
+
+**Non-blocking nice-to-haves:** `--data @file` / form encoding, connection reuse, progress meter. Out of scope.
+
+**Status:** ✅ Done
+
+### Challenge 22 — Shell (gosh) — ✅ APPROVED (Phase 3 capstone)
+
+**What:** Working interactive Unix shell (`gosh`) in Go at `phase-03-advanced-cli/shell/` — tokenizer → recursive-descent parser → pipeline AST → fork/exec executor wiring real pipes/redirects. The orchestrator that runs every other Phase 2 tool.
+
+**Implementation:**
+- **Three-stage pipeline:** `lexer.go` (tokenize, quote/escape aware) → `parser.go` (recursive-descent → AST) → `executor.go` (fork/exec + fd wiring). One file per stage.
+- **Features:** quotes (single/double) + backslash escapes; pipelines `a | b | c`; redirections `>` `>>` `<` `2>`; sequencing `;`; logical `&&`/`||` short-circuit; env expansion `$VAR`/`${VAR}`/`$?`/`$$`; builtins `cd`/`pwd`/`exit`/`echo`/`export`/`type`; Ctrl-C interrupts child (not shell); interactive REPL + `-c "string"` + script-file modes.
+- **AST shape:** `List(;) → AndOr(&&/||) → Pipeline(|) → Command(args+redirs)`. Grammar nesting encodes precedence (`;` loosest, redirs tightest).
+
+**Hard-won reusable lessons (process-spawning challenges):**
+1. **#1 pipeline bug: parent must CLOSE its pipe-fd copies after starting children.** Each `exec` dups the fd into child; if parent keeps write-end open reader never sees EOF and pipeline hangs forever. Explicit "ownership rule": every pipe-end used by exactly one stage; external stages → parent closes after `Start()`, builtin stages (goroutine) → goroutine closes its own. See `execMulti` + `parentCloses`.
+2. **`cd` MUST be a builtin** — working directory is per-process state; child `cd` changes its own dir then exits, leaving parent unmoved. Same for `exit`/`export`/assignment. README has prominent section with the "why".
+3. **fork/exec framed as two-step with a gap:** `cmd.Start()` ≈ fork, `cmd.Wait()` ≈ wait; gap is where you rewire fds via `cmd.Stdin/Stdout/Stderr =` assignment.
+4. **Lexer gotcha:** unquoted chars must be COALESCED into one expandable word-part, else `$MYVAR` tokenizes separate `$`+`M`+`Y`+… and `$` never sees name. Store words as `[]wordPart{text, expand}` so quoting context (single='literal', double/unquoted='expandable') survives to expansion. Caught via failing `export`/`$?` test.
+5. **Glued operators** (`2>file`, `a"b"c`): detect pending word of exactly `"2"` immediately before `>` to emit stderr-redirect token.
+6. **Signals:** shell + foreground child share process group, both get SIGINT; shell installs handler that swallows it (reprint prompt) while child dies. Simple, matches bash feel.
+
+**Reusable conventions:**
+- Same Go layout: `module gosh` / `go 1.22`, thin `main.go` (mode select only), all logic in `internal/shell/` for testability without TTY. `Shell` holds `In io.Reader`, `Out`/`Err io.Writer` → tests wire `bytes.Buffer`, production wires os.Std*. Injected-streams pattern scaled perfectly to large program.
+- **Init-cycle gotcha:** `var builtins = map{...}` literal whose funcs call `isBuiltin` (reads map) is compile-time cycle in Go. Fix: populate map in `init()` instead. Remember for any dispatch-table-with-self-reference pattern.
+- README-first: 🐍→🐹 analogies (Popen≈Start, .wait≈Wait), ASCII fd diagram of `cmd1 | cmd2 > file`, links `docs/go-quickstart.md`. The "what does the pipe actually do under the hood" diagram is centerpiece.
+
+**Teaching angles:**
+1. **The orchestrator that runs every other tool.** Phase 3 capstone tying everything together.
+2. **Pipe EOF hang trap and the parent-close ownership rule.** Critical for any multi-process code.
+3. **Why `cd` must be a builtin.** Process state mutation insight.
+
+**Verification:** `go vet` clean; `go test ./...` → 33 pass (tokenizer/parser/expand/executor/builtins + REAL execution). Manually: `cd`+`pwd`, `echo a b | cat | wc -w` → 2, redirect+readback, `false ; echo $?` → 1, `true ; echo $?` → 0, `type cd/ls`, export+expansion — all correct.
+
+**Scope boundaries (documented in README):**
+- No job control (`&`, `fg`/`bg`), no globbing, no command substitution `$(...)`, no here-docs.
+- `2>>` treated as `2>` (overwrite) — deliberate, documented.
+- Expansion does not re-split on spaces (one arg stays one arg).
+
+**Non-blocking nice-to-haves:** `2>>` append mode, post-expansion word-splitting/globbing. Not blockers.
+
+**Status:** ✅ Done
