@@ -1,0 +1,11 @@
+# Go build artifacts
+/tar
+*.exe
+*.test
+*.out
+
+# Test/scratch archives
+*.tar
+
+# Editor / OS noise
+.DS_Store

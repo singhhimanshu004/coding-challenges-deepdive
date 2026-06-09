@@ -119,9 +119,9 @@ For **every** challenge, you write the teaching README *before* the code. This i
 
 | # | Challenge | Diff | Lang | ⏱️ | Why this language / what it teaches | ✅ |
 |---|-----------|------|------|----|-------------------------------------|----|
-| 16 | **jq** (JSON processor) | 🔵 | 🟦 Go | L | Reuses your Phase 1 parser, then adds a filter/expression language + tree-walking evaluator. | [ ] |
+| 16 | **jq** (JSON processor) | 🔵 | 🟦 Go | L | Reuses your Phase 1 parser, then adds a filter/expression language + tree-walking evaluator. | [x] |
 | 17 | **yq** (YAML processor) | 🔵 | 🟨 Python | M | YAML is a JSON superset; `ruamel`/`pyyaml` let you focus on the data model and a deliberate contrast to Go's `jq`. | [ ] |
-| 18 | **xargs** | 🔵 | 🟦 Go | M | Batching stdin into argv, spawning processes, and bounded parallelism. | [ ] |
+| 18 | **xargs** | 🔵 | 🟦 Go | M | Batching stdin into argv, spawning processes, and bounded parallelism. | [x] |
 | 19 | **tar** | 🔵 | 🟦 Go | M | Binary header parsing & file metadata — directly extends Phase 1's bit/byte skills. | [ ] |
 | 20 | **crontab** | 🔵 | 🟦 Go | M | Cron-expression parsing and time-based scheduling logic. | [ ] |
 | 21 | **curl** | 🔵→🟠 | 🟦 Go | L | An HTTP/1.1 client from raw TCP: request framing, headers, chunked encoding, TLS. The bridge into networking. | [ ] |

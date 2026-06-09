@@ -1,0 +1,20 @@
+# A small sample document exercising the YAML data model.
+service: web
+replicas: 3
+enabled: true
+ports:
+  - 80
+  - 443
+metadata:
+  team: platform
+  owner: himanshu
+# Anchors (&) define a node once; aliases (*) reuse it.
+defaults: &defaults
+  retries: 5
+  timeout: 30
+production:
+  <<: *defaults
+  region: us-east-1
+staging:
+  <<: *defaults
+  region: us-west-2

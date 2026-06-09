@@ -526,3 +526,212 @@ Every tool: `go vet ./...` clean, `go test ./...` green, and behaviour spot-chec
 - Forward dump **byte-identical to system xxd** (default and `-c 8`).
 - `-r` reverse **round-trips binary** (500 random bytes) exactly.
 - Binary-safe I/O throughout (`io.ReadFull`, `io.CopyN` for `-s`). Exit codes 0/1/2.
+
+---
+
+## Decision: Phase 3, Challenge 16: jq (JSON processor) — Go
+
+**Author:** Malcolm (Content Dev) · **Date:** 2026-06-09 · **Requested by:** Himanshu Singh
+
+### What was built
+A from-scratch `jq` clone in Go at `phase-03-advanced-cli/jq/`, mirroring the
+codingchallenges.fyi "build your own jq". The NEW concept for this phase is a
+**filter/expression language + tree-walking evaluator** layered on top of the
+Phase-1 `lex → parse → evaluate` parsing skill.
+
+- **Filter language supported:** identity `.`, field `.foo`, nested `.foo.bar`,
+  optional `.foo?`, index `.[0]`/`.[-1]`/`.["k"]`, iterate `.[]`, pipe `|`,
+  comma `,`, array construction `[…]`, grouping `(…)`, comparisons
+  `== != < > <= >=`, arithmetic `+ - * /` (with `+` overloaded for
+  string/array/object), and builtins `length keys values has select map`
+  (plus `not`, `empty`, `keys_unsorted`).
+- **CLI:** `-c` compact, `-r` raw strings, `-S` sort keys, `-C/-M` colour;
+  reads file args or stdin; reads a *stream* of JSON values; exit codes 0/1/2.
+
+### Key technical decisions (reusable insights)
+1. **Two parsers, one skeleton.** The challenge applies `lex → parse → evaluate`
+   *twice*: once to JSON data, once to the filter program. Framing it that way is
+   the whole teaching payload, and it's the throughline for Calculator (58) and
+   Lisp (59).
+2. **Every filter is `input → []output` (a stream).** Modelling each expression
+   as `eval(node, input) ([]any, error)` makes pipe (feed each), comma (concat),
+   `select` (0 outputs) and `.[]` (many outputs) all fall out of ONE composition
+   rule. This is the single most important design choice.
+3. **Paths reduce to pipes.** The parser rewrites `.a.b` → `Pipe(Field a, Field b)`
+   and `.items[]` → `Pipe(Field items, Iterate)`. The evaluator then only needs
+   one rule and never has special "path" code. Very clean — reuse for yq.
+4. **Insertion-ordered `*Object` instead of `map[string]any`.** Go maps randomise
+   iteration order; real jq preserves input key order. A custom ordered object
+   (keys slice + map) makes output match jq byte-for-byte. Worth the ~30 lines.
+   `keys` builtin sorts a copy; default output keeps source order; `-S` sorts.
+5. **Hand-rolled JSON parser chosen over `encoding/json`** for learning value AND
+   to get key-order preservation for free. Documented the trade-off explicitly in
+   the README (prod code should prefer `encoding/json` + `json.Decoder`).
+
+### Verification
+- `go vet ./...` clean; `go test ./...` passes (40+ cases).
+- **Differentially checked against real `jq`** — byte-for-byte identical output.
+- Same testable `main()`→`run(args, stdin, stdout, stderr) int` pattern as Phase 2; tests drive `run()` with `strings.Builder` buffers (no subprocess/temp files).
+
+### Status
+✅ DONE. CURRICULUM.md row 16 ticked `[x]`. README-first teaching doc written (7 sections, Python/Go analogies, linked to docs/go-quickstart.md).
+
+---
+
+## Decision: Phase 3, Challenge 17: yq (YAML processor) — Python
+
+**Author:** Malcolm (Content Dev) · **Date:** 2026-06-09
+
+### What was built
+A from-scratch `yq` at `phase-03-advanced-cli/yq/` in Python: loads YAML/JSON
+into plain Python objects, queries them with a hand-built jq-like mini-language,
+and converts between YAML and JSON. 54 pytest cases, all passing.
+
+### Layout (reaffirms Python conventions from JSON Parser / QR)
+- Package named after the tool (`yq/`), one module per pipeline stage:
+  `loader.py`, `query.py` (lexer+parser+evaluator), `convert.py`, `cli.py`,
+  `errors.py`, plus `__init__.py` and `__main__.py` for `python -m yq`.
+- `tests/` package with `pytest.ini`.
+- `requirements.txt` (PyYAML>=6.0), `.gitignore` (`.venv/`, `__pycache__/`,
+  `*.pyc`, `.pytest_cache/`).
+
+### Key design decisions
+- **Delegated YAML tokenisation to PyYAML** (`safe_load_all`). The "build it
+  yourself" mandate applies to the *query interpreter*, not to re-tokenising
+  YAML's huge grammar.
+- **`safe_load` only** — default loader is an RCE risk.
+- **The value-stream model is the teaching headline.** Every AST node evaluates
+   one input value to a *stream* (generator) of outputs.
+- jq semantics copied deliberately: missing field → null, field-on-null → null,
+  out-of-range index → null.
+
+### Verification
+- `python -m pytest -q` → 54 passed.
+- Real queries on sample YAML verified correct.
+- Exit codes spot-checked (0/1/2).
+
+### Status
+✅ DONE. CURRICULUM.md Challenge 17 ticked. README-first teaching doc written.
+
+---
+
+## Decision: Phase 3, Challenge 18: xargs (CLI orchestration) — Go
+
+**Author:** Malcolm (Content Dev) · **Date:** 2026-06-09
+
+### What was built
+From-scratch `xargs` in Go at `phase-03-advanced-cli/xargs/`. Reads items from
+stdin, batches them into argv, and spawns child processes with bounded
+parallelism. Flags: `-0`, `-n N`, `-I R`, `-P N` (bounded parallelism), `-t`. 
+
+### New reusable patterns (first orchestration tool)
+1. **Injectable `runner` function type** = the key testability seam for any
+   process-spawning tool.
+2. **Bounded parallelism = buffered channel as counting semaphore + WaitGroup.**
+   This is the canonical Go worker-pool throttle.
+3. **Deterministic parallelism test via a barrier, not sleeps.** 
+4. **Race-test process spawners with `os.Pipe`**, not shared buffers.
+
+### Verification
+- `go vet ./...` clean, `go test ./... -race` passes.
+- Real pipelines with `-n1`, `-n2` remainder, `-I {}`, `-0`, `-t`, and `-P4` timing verified.
+- Failing child returns 123.
+
+### Status
+✅ DONE. CURRICULUM.md Challenge 18 ticked. README-first teaching doc written.
+
+---
+
+## Decision: Phase 3, Challenge 19: tar (Binary format & streaming) — Go
+
+**Author:** Malcolm (Content Dev) · **Date:** 2026-06-09
+
+### What was built
+From-scratch POSIX **USTAR** archiver in Go at `phase-03-advanced-cli/tar/`. 
+`-c` create, `-t` list, `-x` extract, with `-f archive` and `-v`.
+The 512-byte header is encoded/decoded by hand; `archive/tar` is NOT used.
+
+### Format lessons (reusable for xxd / DNS / NTP)
+1. **Name byte offsets as explicit constants** (`offName=0`, `offSize=124`, …).
+   Go has no C-style "struct at fixed offsets", so the constant block IS the
+   header diagram.
+2. **USTAR numbers are ASCII OCTAL text, not binary** — byte-order-free portability.
+3. **Checksum self-reference trick:** sum all 512 bytes BUT count the 8 checksum
+   bytes as ASCII spaces (0x20).
+4. **Two-zero-block terminator, not one.**
+5. **`splitPath` for >100-byte paths:** USTAR puts the tail in `name` (100B) and
+   head in `prefix` (155B).
+
+### Security (extraction = untrusted input)
+- `safeJoin(destDir, name)` rejects absolute paths AND `..` traversal by
+  Clean-ing the joined path and confirming it stays under `destDir`.
+  **Pattern to reuse for any extract/unzip-style tool.**
+
+### Verification
+- `go test ./...` (8 tests) + `go vet ./...` both pass.
+- **Interop confirmed BOTH directions on macOS bsdtar:**
+  - Our `-cvf` archive → system `tar -tf` lists it and `tar -xf` extracts it.
+  - System `tar -cf` archive → our `-tf` lists and `-xvf` extracts it.
+
+### Status
+✅ DONE. CURRICULUM.md Challenge 19 ticked. README-first teaching doc written.
+
+---
+
+## Decision: Phase 3, Challenge 20: crontab (Date/time scheduling) — Go
+
+**Author:** Malcolm (Content Dev) · **Date:** 2026-06-09
+
+### What was built
+From-scratch cron-expression parser + next-run scheduler in Go at
+`phase-03-advanced-cli/crontab/`. Parses the 5-field grammar (minute, hour,
+day-of-month, month, day-of-week) with `*`, lists, ranges, steps, named months/days,
+and macros `@hourly/@daily/@weekly/@monthly/@yearly/@annually`. 
+Computes the next N run times from any reference instant.
+
+### Key technical decisions / lessons
+- **Fields as `uint64` bitsets.** Bit `v` set ⇒ value `v` allowed. Matching a
+  time becomes five `&` membership tests.
+- **Steps always ride on a range.** `*`→`min-max`, `a-b`→explicit, `a/s`→`a-max`.
+- **The dom/dow OR rule is the headline gotcha.** When BOTH day-of-month and
+  day-of-week are restricted (neither `*`), a day matches if EITHER matches.
+  Must store `domStar`/`dowStar` booleans separately from the bitsets.
+- **Sunday alias.** dow accepts `0-7`; `7` normalized to `0` at parse time.
+- **Next-run = jump, don't crawl.** Skip the largest wrong unit (month→day→hour→
+  minute) using `time.Date(...)`.
+- **Strictly-after semantics:** truncate reference to the minute and `+1m` before
+  searching.
+
+### Verification
+- `go vet ./...` clean; `go test ./...` passes (24 tests).
+- Ran CLI on real exprs from 2026-06-09: all next-run times correct.
+- dom/dow OR rule verified with `0 0 13 * 5` — fires on every Friday AND the 13th.
+
+### Status
+✅ DONE. CURRICULUM.md Challenge 20 ticked. README-first teaching doc written.
+
+---
+
+## Review Verdict — Phase 3 Wave 1 (jq, yq, xargs, tar, crontab)
+
+**Reviewer:** Ellie · **Date:** 2026-06-09 · **Requested by:** Himanshu Singh
+
+### Overall: ✅ ALL FIVE APPROVED
+
+Every challenge passed independent verification: `go vet ./...` + `go test ./...`
+(jq/xargs/tar/crontab) and the yq `.venv` pytest suite, plus real behavioral
+spot-checks and — for jq and tar — differential/interop checks against the
+system binaries.
+
+### Per-challenge verdicts
+
+| Challenge | Lang | Verdict | Notes |
+|-----------|------|---------|-------|
+| jq        | Go     | ✅ APPROVED | Byte-identical to system jq; lex→parse→eval pipeline clean |
+| yq        | Python | ✅ APPROVED | 54 pytest cases pass; safe_load only; value-stream model |
+| xargs     | Go     | ✅ APPROVED | -P parallelism verified; race-test with os.Pipe; exit codes 0/1/2 |
+| tar       | Go     | ✅ APPROVED | Interop both ways on system tar; path-traversal guard verified |
+| crontab   | Go     | ✅ APPROVED | dom/dow OR rule verified; next-run all correct; real exprs tested |
+
+**Phase 3 Wave 1 COMPLETE.**
+
