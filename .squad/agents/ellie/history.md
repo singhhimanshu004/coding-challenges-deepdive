@@ -251,3 +251,52 @@
 - **Shell/gosh** (`phase-03-advanced-cli/shell/`) — ✅ APPROVED. `go vet` clean; `go test ./...` → 33 pass. Hand-drove binary: 2-stage pipe, redirect+readback, cd→pwd, `$?` after failure, `&&`/`||`, quote semantics — all correct. Tokenizer (quotes/escapes), recursive-descent parser, executor (os.Pipe N-stage + the parent-fd-close-for-EOF rule), in-process builtins (cd/pwd/exit/echo/export/type), `$VAR/${VAR}/$?/$$` expansion, SIGINT swallow. README (297 lines) has the fd pipeline diagram + "why cd must be a builtin" section + go-quickstart link.
 - **Non-blocking nits:** shell `2>>` treated as `2>` (documented); no post-expansion word-splitting/globbing (reasonable scope cut). Neither blocks approval.
 - **Reusable learning:** go1.22.2 darwin/arm64 cgo external-linker LC_UUID abort affects any Go binary importing net/crypto/tls at test load — verify such challenges with `CGO_ENABLED=0 go test`; it is NOT a code failure.
+
+### 2026-06-13 — Review: Phase 4 Wave 1 — DNS Resolver (23), NTP Client (25), Port Scanner (27), netcat (28)
+
+**Verdict: ✅ ALL FOUR APPROVED.** Independently ran `go vet ./...` (clean) + `CGO_ENABLED=0 go test ./...` (PASS) in each dir. LC_UUID cgo abort not treated as a failure; all 4 READMEs document the `CGO_ENABLED=0` workaround. The two repaired challenges are genuinely complete (real code + teaching README, no stubs).
+
+- **dns-resolver (23):** Raw `net.DialUDP`, NO `net.Resolver`/`LookupHost`. Hand-packed 12-byte header (6×uint16 BE), QNAME label encode, full RR parse. **Name compression (0xC0) decode correct**: 14-bit offset `&0x3FFF`, returns continuation offset past the 2-byte pointer (not the jump target), caps jumps vs loops; RDATA names decoded against full message. Crafted-byte tests cover compression (name + offset) and pointer-loop rejection. README honestly states recursive default + iterative `--trace`. All 7 sections + quickstart.
+- **ntp-client (25):** 48-byte packet, first byte `(0<<6)|(version<<3)|modeClient` (v3→0x1B). Epoch offset 2208988800; `(frac*1e9)>>32` fixed-point; cleanest check present (NTP secs==offset → Unix 0). offset/delay formulas correct. Crafted-byte tests, no live server. 7 sections + quickstart.
+- **port-scanner (27):** TCP connect via `net.DialTimeout`; textbook worker pool (buffered jobs/results channels + N goroutines + `sync.WaitGroup` + closer goroutine). Tests use only `127.0.0.1:0` listeners; OPEN reported, closed excluded; single-worker + sorted cases. 7 sections + quickstart.
+- **netcat (28):** Two concurrent `io.Copy` relay; TCP `CloseWrite()` half-close; UDP `-w` deadline + `udpListenConn` peer-learning adapter. Connect+listen, TCP+UDP. In-process loopback tests assert bytes BOTH directions (ping↑/pong↓). 7 sections + quickstart.
+
+**Non-blocking nice-to-haves:** dns `formatIPv6` skips `::` compression (documented); netcat ignores send-side `io.Copy` error (fine for a relay). Verdicts written to `.squad/decisions/inbox/ellie-phase4-wave1-review.md`.
+
+### 2026-06-13 — Review: Phase 4 WAVE 2 (Challenges 24/26/29) — ✅ ALL APPROVED (Phase 4 COMPLETE)
+
+Independently ran `go vet ./...` (clean) + `CGO_ENABLED=0 go test -count=1 -v ./...`
+(all PASS) in each dir. No LC_UUID abort under CGO_ENABLED=0.
+
+- **dns-forwarder (#24) — ✅ APPROVED.** UDP server, goroutine-per-request, RWMutex
+  TTL cache keyed on (QNAME,QTYPE,QCLASS). Tests use a LOCAL fake upstream with an
+  atomic hit counter + injectable fake clock: TestForwardAndRelay (1 hit),
+  TestSecondQueryServedFromCache (still 1 hit, txn-ID patched per client),
+  TestCacheExpiresAfterTTL (within TTL=1 hit, past TTL=2 hits) — proves hit/miss +
+  expiry with no internet. Defaults to :1053; README documents :53/sudo/setcap.
+  Caches min-answer-TTL, skips TTL=0, lazy expiry with double-check under write lock.
+- **traceroute (#26) — ✅ APPROVED.** Unprivileged ICMP: icmp.ListenPacket("udp4")
+  + ipv4.PacketConn.SetTTL per probe (no root). buildEchoRequest/parseICMPReply
+  unit-tested with crafted bytes (TimeExceeded/EchoReply/DstUnreach/echo-req-ignored
+  + garbage→error); runTrace hop iteration driven by a fake prober (stops at dest,
+  star on timeout, respects maxHops); formatHop rendering tested. go.mod/go.sum
+  include golang.org/x/net v0.31.0. Live integration test self-skips on socket error.
+- **http-forward-proxy (#29, CAPSTONE) — ✅ APPROVED.** Plain HTTP: absolute→origin
+  rewrite + hop-by-hop stripping (RFC 7230 set, canonicalised), httptest origin
+  asserts origin never sees absolute-form. HTTPS CONNECT: 200 Connection Established
+  + bidirectional io.Copy relay with CloseWrite half-close; tested via httptest TLS
+  server through http.Transport CONNECT AND a raw hand-written CONNECT + real TLS
+  handshake over the tunnel (TestConnectRawHandshake). README explains TLS opacity
+  (proxy can't decrypt; MITM needs forged CA) and ties back to curl/netcat.
+
+READMEs: all 7 mandated sections each, 🐍➡️🐹 Go-idiom explanations (iota enums,
+implicit interfaces, goroutine-per-conn, RWMutex, deadlines, blank-assignment
+interface check), docs/go-quickstart.md linked, CGO_ENABLED=0 workaround documented.
+
+**Non-blocking nice-to-have:** traceroute's TestTraceIntegration is gated only by
+`testing.Short()`, so a plain `go test ./...` makes a live call to 8.8.8.8 (it
+self-skips on error and can't fail the suite). Gating behind an env var (or
+default-skip) would make the default run fully hermetic. Not a blocker.
+
+Verdicts written to `.squad/decisions/inbox/ellie-phase4-wave2-review.md`.
+**Phase 4 (Networking) is COMPLETE — all challenges approved.**

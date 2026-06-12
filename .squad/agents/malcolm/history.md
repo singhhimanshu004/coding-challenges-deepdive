@@ -7,6 +7,24 @@
 - **Stack:** Multi-language (Go, Python, Java, TypeScript)
 - **Scope:** 65+ coding challenges — building real-world tools from scratch
 
+
+## Summary by Phase
+
+**Phase 1: Foundations (JSON Parser)** — Lex→parse pipeline, recursive descent, testable module layout.
+
+**Phase 2: Core Unix (11 challenges)** — Text processing patterns: stream + regex (wc, uniq, sort, grep, sed), structured parsing (CSV, XML, YAML), archive handling (tar), and version comparison (cut/paste).
+
+**Phase 3: Advanced CLI & Orchestration (7 challenges)** — Process orchestration (make, cron, git hooks), shell parsing & execution (recursive descent AST, fork/exec/pipe, builtin dispatch), pipe EOF hang (critical pattern: parent must close pipe copies after fork), working directory mutations.
+
+**Phase 4: Networking (4/7 done)** — UDP fundamentals (DNS wire format, name-compression pointers, NTP epoch math), TCP (connect scan worker pool, netcat bidirectional relay), half-close patterns (interface checks not bools), deadline-driven termination for connectionless protocols, CGO_ENABLED=0 workaround for darwin/arm64.
+
+Key reusable patterns:
+1. Module split: lexer→parser→executor (or equivalent domain stages).
+2. Testable via interface injection (io.Reader, io.Writer, error handlers).
+3. Hand-crafted unit tests on byte literals (no network, file I/O, randomness).
+4. UDP needs deadline; TCP needs half-close; processes need fd ownership.
+5. Goroutines + channels for parallelism; WaitGroup + closer goroutine for clean shutdown.
+
 ## Learnings
 
 ### 2026-06-08 — Repository scaffolding complete (stubs only)
@@ -322,3 +340,96 @@ go1.22.2 / darwin-arm64: importing net pulls cgo; external linker mismatch cause
 Four Go networking challenges, all Ellie-approved: DNS wire format + compression decode, NTP 48-byte + epoch math, concurrent worker-pool scanner, bidirectional TCP/UDP relay.
 
 **Status:** All four approved by Ellie 2026-06-13. Phase 4 networking: 4/7. CURRICULUM.md checkboxes 23/25/27/28 ticked.
+
+
+## Phase 4 Wave 2 — Challenges 24, 26, 29 (Networking Complete)
+
+**Date:** 2026-06-13 · **Status:** ✅ All three approved by Ellie.
+
+### Challenge 24: DNS Forwarder (UDP listen + caching)
+
+**What I built:**
+- `cache.go` — concurrent-safe `sync.RWMutex` cache keyed on (QNAME, QTYPE, QCLASS) triple, injectable clock for testability.
+- `forwarder.go` — UDP listen loop, query forward to upstream, answer relay + patched transaction ID.
+- `main.go` — CLI parsing (--listen, --upstream, --verbose).
+- Tests: fake local upstream with hit counter proves caching; table-driven TTL boundaries.
+
+**Key decisions:**
+1. Cache key must be the FULL triple (QNAME, QTYPE, QCLASS) — IPv4 answer to AAAA query is wrong. Wrote this as the headline gotcha.
+2. Minimum TTL across answer set (answer is only as fresh as its shortest-lived record).
+3. Copy UDP read buffer before goroutine (reused on next read — classic UDP gotcha).
+4. Patch transaction ID when serving from cache or client rejects as unsolicited.
+5. Injectable clock lets TTL tests advance time instantly (no `time.Sleep` flakiness).
+
+**Testability win (reusable for forward/relay components):**
+Real local UDP peer + atomic hit counter on 127.0.0.1:0 is the cleanest offline proof of caching. No internet, fully hermetic.
+
+**Verification:** `CGO_ENABLED=0 go vet ./...` + `CGO_ENABLED=0 go test ./...` all pass.
+
+**Scope boundaries (in README):** No on-the-wire TTL decrement (serve original TTL), no negative caching, no EDNS0, no TCP fallback, no size-based eviction. Natural follow-ups.
+
+**Status:** ✅ Complete and Ellie-approved.
+
+### Challenge 26: Traceroute (unprivileged ICMP)
+
+**What I built:**
+- `icmp.go` — build echo-request bytes, parse/classify replies (Time Exceeded / Echo Reply / Dest Unreachable).
+- `trace.go` — TTL iteration loop via `prober` interface, hop rendering.
+- `main.go` — CLI parsing (--max-hops, --probes, --timeout, --resolve).
+- Tests: scripted fake prober drives loop offline; live test self-skips on socket error.
+
+**Key decisions:**
+1. **Unprivileged ICMP:** Used `icmp.ListenPacket("udp4", ...)` + `ipv4.PacketConn.SetTTL` per probe (same as macOS `ping`, no root needed).
+2. **Testability seam:** Three pure pieces (build bytes, parse/classify, loop) + `prober` interface. Fake prober drives deterministic tests; live test self-skips on offline (never fails).
+3. **Toolchain:** `golang.org/x/net` pinning — latest v0.56 requires Go ≥ 1.25. Pinned v0.31.0 + `GOTOOLCHAIN=local` to stay on repo's go1.22.
+
+**Reusable lessons I learned:**
+1. Unprivileged datagram ICMP peer carries junk `:0` port (discovered via live run vs unit tests).
+2. Read deadlines (not per-call timeouts) — Go uses `SetReadDeadline(absolute-time)`, Python analogue `settimeout`.
+3. macOS LC_UUID linker bug reappeared — plain `go test` → abort. Fixed: `CGO_ENABLED=0 go test ./...`.
+
+**Verification:** `CGO_ENABLED=0 go vet ./...` + `CGO_ENABLED=0 go test ./...` pass; live reached 8.8.8.8 at hop 8.
+
+**Scope (README):** ICMP-probe only (like Windows `tracert`); UDP variant explained but not built. IPv4 only. Reverse-DNS opt-in, best-effort.
+
+**Status:** ✅ Complete and Ellie-approved.
+
+### Challenge 29: HTTP Forward Proxy (Phase 4 capstone)
+
+**What I built:**
+- `proxy.go` — HTTP request rewriting (absolute→origin), hop-by-hop header stripping, `Connection: close` framing.
+- `tunnel.go` — CONNECT tunnel: dial origin, reply 200, `io.Copy` both directions (TCP half-close via interface check).
+- `main.go` — CLI, listen/accept loop.
+- Tests: httptest origin + proxy (plain HTTP); httptest.NewTLSServer + proxy (CONNECT); raw socket CONNECT test.
+
+**Why this is the capstone:**
+Literally reuses prior Phase 4 lessons. CONNECT tunnel = netcat bidirectional relay. Plain-HTTP rewriting = curl's "HTTP is just text on a socket". README explicitly calls both connections out.
+
+**Teaching angle (headline — made #1 Key Takeaway):**
+**TLS opacity.** After `200 Connection Established` proxy never sees session keys. Cannot read/alter HTTPS traffic. Only way to "see inside" is TLS interception with forged cert (mitmproxy / corporate MITM) — exactly why HTTPS makes that refusable.
+
+**Key decisions:**
+1. **Hand-rolled parsing logic:** `http.ReadRequest` (parsing already taught), but request rewriting (absolute→origin), hop-by-hop stripping, CONNECT tunnel all hand-rolled.
+2. **Request rewriting:** `req.URL.RequestURI()` converts URL→path (the thing that makes a proxy a proxy).
+3. **`Connection: close` simplification:** Forces it on origin → response ends at EOF → proxy `io.Copy` relay (no response parsing). Good teaching move; production would loop for keep-alive.
+4. **Read client tunnel side through `bufio.Reader`** (not raw conn) so pipelined bytes after CONNECT aren't dropped.
+5. **TCP half-close via interface check** (not protocol flag) — checks if conn satisfies `halfCloser` interface.
+
+**Testing (fully self-contained):**
+- Plain HTTP: `httptest.NewServer` origin asserts it never sees absolute-form (proves rewrite).
+- CONNECT: TLS handshake completing *through tunnel* is itself proof relay is byte-accurate.
+- Raw-socket CONNECT: hand-written line, manual TLS handshake, wire-level verification.
+
+**Toolchain:** Same macOS LC_UUID issue; `CGO_ENABLED=0 go test ./...` required.
+
+**Verification:** `go vet ./...` clean; `CGO_ENABLED=0 go test ./...` all pass; `CGO_ENABLED=0 go build .` succeeds.
+
+**Status:** ✅ Complete and Ellie-approved. **Phase 4 (Networking) COMPLETE — 7/7 challenges approved.**
+
+### Overall Phase 4 completion
+
+Phase 4 is now end-to-end as a learning arc: curl → DNS wire format + NTP epoch + scanner → netcat relay → this proxy. Each challenge layered on prior lessons.
+
+**Total Phase 4:** 7/7 challenges approved. First four (23/25/27/28) approved 2026-06-13 morning; final three (24/26/29) approved 2026-06-13 end of wave.
+
+**Curriculum status:** 25/64 challenges complete (Phases 1–4 complete; Phases 5–8 pending).

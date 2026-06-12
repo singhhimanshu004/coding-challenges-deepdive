@@ -207,3 +207,105 @@ All six tools built in parallel, reviewed 2026-06-09 by Ellie, all **approved**.
 **Non-blocking nice-to-haves:** `2>>` append mode, post-expansion word-splitting/globbing. Not blockers.
 
 **Status:** ✅ Done
+
+## Phase 4 Wave 2: DNS Forwarder, Traceroute, HTTP Forward Proxy (Capstone) — ✅ ALL APPROVED
+
+Completed 2026-06-13. Three Go networking challenges built by Malcolm, reviewed by Ellie — all approved. Phase 4 (Networking) **COMPLETE** — 7/7 challenges approved.
+
+### Challenge 24: DNS Forwarder — ✅ APPROVED
+
+**What:** Caching, forwarding DNS server at `phase-04-networking/dns-forwarder/`. Listens on UDP (default `:1053`), forwards client queries to upstream resolver (default `8.8.8.8:53`), relays answers, and caches each reply for its TTL. CLI: `--listen`, `--upstream`, `--verbose`.
+
+**Design highlights:**
+- Cache key is the full (QNAME, QTYPE, QCLASS) triple — not just the name (classic mistake; IPv4 answer to AAAA query is wrong).
+- Minimum TTL across answer set used for expiry (answer is only as fresh as shortest-lived record).
+- Concurrency-safe `sync.RWMutex` cache, one goroutine per request, copies datagram before handing to goroutine (UDP buffer reused on next read — gotcha).
+- Patches transaction ID when serving from cache, or client rejects as unsolicited.
+
+**Testing strategy (reusable for forward/relay components):**
+- Fake upstream: local `net.ListenUDP` on 127.0.0.1 with atomic hit counter — proves caching, no internet needed.
+- Injectable clock `cache.now func() time.Time` → TTL expiry test advances time instantly (no flaky sleeps).
+- Table-driven TTL boundaries (fresh/just-before/exactly-at/after expiry/zero-TTL-never-cached).
+- Tests: `TestForwardAndRelay` (first query → 1 hit), `TestSecondQueryServedFromCache` (still 1 hit, ID patched), `TestCacheExpiresAfterTTL` (past TTL → 2 hits).
+
+**Defaults & docs:**
+- Defaults to `:1053` (no root). README documents `:53` + `sudo` + Linux `setcap cap_net_bind_service`.
+
+**Verification:** `go vet` clean; `CGO_ENABLED=0 go test ./...` all pass; no internet needed.
+
+**Status:** ✅ Approved by Ellie 2026-06-13.
+
+### Challenge 26: Traceroute — ✅ APPROVED
+
+**What:** Unprivileged ICMP traceroute at `phase-04-networking/traceroute/` discovering network path hop by hop. No root, no raw sockets. CLI: `[--max-hops 30] [--probes 3] [--timeout 1s] [--resolve] <host>`.
+
+**Teaching idea (headline):**
+Repurpose IP TTL field as "reveal yourself" probe. Each router decrements TTL; when TTL hits 0 router drops packet and mails back ICMP "Time Exceeded" whose source address is that router. Sweeping TTL 1..30 forces every hop to announce itself in order.
+
+**Technical decisions:**
+- **Unprivileged ICMP via `icmp.ListenPacket("udp4", ...)`** from `golang.org/x/net/icmp` + per-packet TTL via `ipv4.PacketConn.SetTTL` (same as macOS `ping`).
+- **Testability via seam:** Three pure, network-free pieces: build echo-request bytes, parse/classify reply (Time Exceeded vs Echo Reply vs Dest Unreachable), TTL iteration loop. Loop depends on `prober` interface → scripted fake drives tests offline, no root, fully deterministic. Live test self-skips on socket error (never fails suite).
+
+**Reusable lessons for future Phase 4+ challenges:**
+1. **`golang.org/x/net` versioning:** Latest x/net (v0.56) requires Go ≥ 1.25 (auto-downloads newer toolchain). Pinned `v0.31.0` + `GOTOOLCHAIN=local` to stay on repo's go1.22 baseline.
+2. **macOS LC_UUID linker bug (recurring):** Plain `go test` aborts "missing LC_UUID" (importing `net` pulls cgo, linker mismatch with Xcode CLT). Fix: `CGO_ENABLED=0 go test ./...`.
+3. **Unprivileged datagram ICMP carries junk `:0` port:** `*net.UDPAddr.String()` on datagram ICMP peer is "1.2.3.4:0" — strip port for display.
+4. **Read deadlines, not per-call timeouts:** Go binds socket read via `SetReadDeadline(absolute-time)`, not timeout argument (Python analogue: `settimeout`). Reusable for every socket-based challenge.
+
+**Verification:** `CGO_ENABLED=0 go vet ./...` + `CGO_ENABLED=0 go test ./...` pass; live sanity reached 8.8.8.8 at hop 8 with sensible per-hop RTTs.
+
+**Scope (documented in README):** ICMP-probe traceroute only (like Windows `tracert`); UDP variant explained but not implemented. IPv4 only. Reverse-DNS opt-in (`--resolve`), best-effort.
+
+**Status:** ✅ Approved by Ellie 2026-06-13.
+
+### Challenge 29: HTTP Forward Proxy (Phase 4 capstone) — ✅ APPROVED
+
+**What:** Forward proxy in Go at `phase-04-networking/http-forward-proxy/` listening on TCP (`:8080` default), one goroutine per client. Handles:
+- **Plain HTTP** — parses absolute-form request, rewrites to origin-form, strips hop-by-hop headers, forwards, relays response.
+- **HTTPS via CONNECT** — dials origin, replies `200 Connection Established`, relays raw bytes bidirectionally so client's TLS handshake passes through opaquely.
+
+**Why it's a capstone:**
+Literally reuses prior Phase 4 lessons. CONNECT tunnel = netcat bidirectional byte relay with two sockets. Plain-HTTP rewriting builds on curl's "HTTP is just text on a socket". README explicitly calls both out so learner sees the arc.
+
+**Teaching angle (headline):**
+**TLS opacity** — after `200 Connection Established` client and origin negotiate session keys the proxy never sees. Proxy *cannot* read/alter HTTPS traffic. Only way to "see inside" is TLS interception with forged cert (mitmproxy / corporate MITM), which is exactly why HTTPS makes that refusable. Made this the #1 Key Takeaway.
+
+**Implementation details:**
+- **Parsing:** `http.ReadRequest` (parsing already taught by curl, not the lesson here). Request rewriting (absolute→origin), hop-by-hop stripping, CONNECT tunnel all hand-rolled.
+- **Request rewriting:** `req.URL.RequestURI()` converts URL→path (the thing that makes a proxy a proxy).
+- **`Connection: close` simplification:** Forces it on origin request → response ends at EOF → proxy never parses response, just `io.Copy` relay. Good teaching simplification; production would loop for keep-alive.
+- **Read client tunnel side through `bufio.Reader`** (not raw conn) so bytes pipelined right after CONNECT aren't dropped.
+
+**Testing (fully self-contained, no internet):**
+- **Plain HTTP:** `httptest.NewServer` origin + `http.Client` with `Transport.Proxy` set to our proxy. Origin asserts it never sees absolute-form (proves rewrite). Table-driven over root/nested/query paths.
+- **CONNECT:** `httptest.NewTLSServer` + transport trusting test cert AND using proxy. TLS handshake completing through tunnel is itself proof relay is byte-accurate.
+- **Raw-socket CONNECT test:** Hand-writes CONNECT line, runs TLS handshake manually, shows wire steps with nothing hidden.
+- **Helper unit tests:** Two pure helpers tested in isolation.
+
+**Toolchain (same as curl & all Phase 4 Go challenges):**
+macOS: plain `go test` aborts `missing LC_UUID` (cgo linker quirk). Fix: `CGO_ENABLED=0 go test ./...`.
+
+**Verification:** `go vet ./...` clean; `CGO_ENABLED=0 go test ./...` all pass; `CGO_ENABLED=0 go build .` succeeds.
+
+**Status:** ✅ Approved by Ellie 2026-06-13. **Phase 4 Networking COMPLETE — 7/7 challenges approved.**
+
+---
+
+## Overall: Phase 4 Wave 2 Review Summary
+
+**Date:** 2026-06-13
+**Reviewer:** Ellie
+**Scope:** dns-forwarder (#24), traceroute (#26), http-forward-proxy (#29, capstone)
+**Method:** `go vet ./...` + `CGO_ENABLED=0 go test -count=1 -v ./...` + source review + README quality gate
+
+**All three ✅ APPROVED.**
+
+### README Quality Gate (all three pass — 7 mandatory sections + Go idioms)
+
+All three READMEs include: What We're Building → Core Concepts → Architecture → Step-by-Step → Testing → Key Takeaways → Further Reading. Explain Go idioms for Python dev (🐍→🐹: iota enums, implicit interface satisfaction, goroutine-per-connection, RWMutex, read deadlines, blank-assignment interface check). Link `docs/go-quickstart.md`. Document `CGO_ENABLED=0` toolchain workaround.
+
+### Non-blocking nice-to-haves
+
+**traceroute:** `TestTraceIntegration` gated only by `testing.Short()` so plain `go test ./...` makes live call to 8.8.8.8. Self-skips on socket error, cannot fail suite, but gating behind env var (or default-skip) would make default run fully hermetic. Not a blocker.
+
+**Overall:** Phase 4 (Networking) is **COMPLETE** — every challenge in the phase is approved. 25/64 overall challenges done (Phase 1–3 complete, Phase 4 complete, Phase 5–8 pending).
