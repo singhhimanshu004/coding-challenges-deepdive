@@ -735,3 +735,72 @@ system binaries.
 
 **Phase 3 Wave 1 COMPLETE.**
 
+
+---
+
+## Decision: Phase 4 Wave 1 Review — DNS Resolver, NTP Client, Port Scanner, Netcat
+
+**Date:** 2026-06-13 · **Reviewer:** Ellie · **Status:** ✅ ALL FOUR APPROVED
+
+### Context
+
+Phase 4 Wave 1 shipped four Go challenges (23, 25, 27, 28). A prior parallel build half-failed (two dirs got only go.mod + TODO stubs), forcing a repair session. This review certifies the completed builds.
+
+### Challenge 23 — DNS Resolver ✅ APPROVED
+
+**Content Dev Note (Malcolm):** Completed from scratch.
+- **Wire format:** 12-byte header (6×uint16 big-endian), QNAME label encoding (length-prefixed + 0x00 terminator), RR parsing.
+- **Name compression (0xC0 pointers):** `decodeName` detects pointer, builds 14-bit offset, returns continuation offset *past the pointer*, caps jumps at 64 to defeat loops. RDATA names decode against full message.
+- **Two modes:** default = recursive query to 8.8.8.8:53 (RD=1); `--trace` = iterative walk from root with NS referrals and glue A fallback.
+- **Tests:** crafted-byte unit tests (header round-trip, name encode/decode with real 0xC0 pointers, pointer-loop rejection, A/MX RR unpack). Live test gated `DNS_NETWORK_TEST=1`.
+- **Verification:** `go vet` clean, `CGO_ENABLED=0 go test` all 11 pass; live queries (A/AAAA/MX gmail.com, `--trace example.com`) correct.
+
+**Ellie's verdict:** Raw wire format, no stdlib resolver. Hand encode/decode verified. Name compression **is the highlight** — pointers work correctly and are thoroughly tested. README all 7 sections + dedicated NAME COMPRESSION walkthrough. **APPROVED.**
+
+### Challenge 25 — NTP Client ✅ APPROVED
+
+**Content Dev Note (Malcolm):** README restored; code was already complete.
+- **Wire format:** 48-byte packet; first byte `(0<<6)|(version<<3)|modeClient` (v3 → 0x1B).
+- **Epoch conversion:** NTP epoch offset = 2208988800; `toTime` subtracts it, converts fractional 2^32 to ns via `(frac*1e9)>>32`. Round-trip `timeToNTP`↔`toTime` tested.
+- **Offset/delay math:** offset = ((T2−T1)+(T3−T4))/2, delay = (T4−T1)−(T3−T2); covered by `TestClockMetrics`.
+- **Tests:** crafted-byte unit tests (short-packet rejection, NTP→Unix conversion). Live test against pool.ntp.org guarded.
+- **Verification:** `go vet` clean, `CGO_ENABLED=0 go test` all 6 pass (including live integration).
+
+**Ellie's verdict:** Epoch math correct. 48-byte format verified. README all 7 sections + fixed-point timestamps + four-timestamp diagram. **APPROVED.**
+
+### Challenge 27 — Port Scanner ✅ APPROVED
+
+**Content Dev Note (Malcolm):** README restored; code was already complete.
+- **Connect scan:** `net.DialTimeout` with mandatory per-connection timeout (filtered ports never reply).
+- **Worker pool:** buffered `jobs`/`results` channels, N goroutines `range`-ing jobs, `sync.WaitGroup`, separate closer goroutine `wg.Wait(); close(results)`. Results sorted.
+- **Args parsing:** hand-rolled flags, `map[int]struct{}` dedup, range/list/single SPEC, bounds 1–65535.
+- **Tests:** self-contained on 127.0.0.1:0 (local listener reported OPEN, closed ports excluded, sorted order). 6 tests cover pool concurrency and all modes.
+- **Verification:** `go vet` clean, `CGO_ENABLED=0 go test` all pass; binary builds.
+
+**Ellie's verdict:** Textbook worker pool. Timeout is non-negotiable (filtered ports). README all 7 sections + connect-vs-SYN scan, why timeouts matter, worker-pool diagram. **APPROVED.**
+
+### Challenge 28 — Netcat ✅ APPROVED
+
+**Content Dev Note (Malcolm):** Completed from scratch.
+- **Bidirectional relay:** `relay(conn io.ReadWriter, stdin, stdout)` runs stdin→conn in goroutine, conn→stdout in main path (concurrent `io.Copy`). Interface-only (testable with `strings.Reader`/`bytes.Buffer`).
+- **TCP half-close:** interface check for `halfCloser.CloseWrite()` on EOF (TCP only, UDP skips).
+- **UDP termination:** driven by `-w` read deadline; deadline is the *normal* end of connectionless relay, not a failure. Swallow `os.ErrDeadlineExceeded`.
+- **UDP adapter:** `udpListenConn` wraps `*net.UDPConn` so a connectionless listener satisfies `io.ReadWriter` (learns sender from first datagram, replies with `WriteToUDP`).
+- **Tests:** 6 self-contained tests (loopback TCP relay both ways, TCP listen, UDP echo, inbound UDP, arg parsing, full end-to-end run). All on 127.0.0.1:0.
+- **Verification:** `go vet` clean, `CGO_ENABLED=0 go test` all 6 pass; binary builds.
+
+**Ellie's verdict:** Textbook half-close via interface check, not a bool flag. `udpListenConn` adapter is reusable shape. README all 7 sections + sockets, TCP/UDP, two-goroutine relay, EOF/half-close. **APPROVED.**
+
+### Toolchain caveat (all four challenges)
+
+On go1.22.2 / darwin-arm64: importing `net` pulls cgo; external linker mismatch causes `dyld: missing LC_UUID` abort. Fix: `CGO_ENABLED=0 go test ./...` (pure-Go internal linker). All four READMEs document this. **Not a code failure.**
+
+### Overall: ✅ PHASE 4 WAVE 1 COMPLETE
+
+Four Go networking challenges, all verified:
+- Raw-UDP DNS wire format w/ name-compression decode (compression pointers loop-safe, tested)
+- 48-byte NTP packet + epoch/offset math
+- Concurrent TCP worker-pool port scanner
+- Bidirectional TCP/UDP netcat relay
+
+**All Ellie-approved. Phase 4 networking: 4/7.**

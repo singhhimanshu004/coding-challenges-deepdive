@@ -248,3 +248,77 @@ Built the final two challenges of Phase 3: **curl** (Challenge 21, Go), **Shell/
 
 **Status:** ✅ Approved by Ellie 2026-06-09. **Phase 3 (Advanced CLI) COMPLETE — 22/22 challenges done.** CURRICULUM.md checkboxes for challenges 21–22 all ticked.
 
+
+---
+
+
+## Phase 4 Wave 1 Repair & Completion — Challenges 23, 25, 27, 28
+
+**Date:** 2026-06-13 · **Context:** Parallel overnight build half-failed (two challenges got only go.mod + stub README). This session repaired and completed all four.
+
+### Challenge 23: DNS Resolver — Built from scratch
+
+**What I built:**
+- `message.go` — wire format: 12-byte Header, QNAME labels, ResourceRecord parsing, message parsing.
+- `resolver.go` — UDP exchange, recursive and iterative modes with NS referrals.
+- `main.go` — CLI parsing, dig-like output, testable run function.
+- Tests: unit tests with crafted bytes, integration test gated DNS_NETWORK_TEST=1.
+
+**Key design decisions:**
+1. Both resolution modes clearly labelled (default recursive, --trace iterative).
+2. decodeName always takes full message + offset to handle name compression pointers.
+3. Single running offset threads through parseMessage for compression pointer handling.
+4. UDP deadline prevents hangs (no connection drop signal in UDP).
+5. Test wire format on crafted bytes, not just round-trip our encoder.
+
+**Verification:** go vet clean; CGO_ENABLED=0 go test all 11 pass; live queries verified.
+
+**Ellie note:** Name compression decode is the highlight. Thoroughly tested. APPROVED.
+
+### Challenge 25: NTP Client — README restored
+
+**What I built:** README only; code was already complete. Documented 48-byte packet, epoch offset (2208988800), four timestamps, offset/delay formulas.
+
+**Key insight:** Epoch conversion math: NTP seconds == offset → Unix epoch 1970-01-01T00:00:00Z.
+
+**Verification:** go vet clean; CGO_ENABLED=0 go test all pass (unit + live against pool.ntp.org).
+
+**Ellie note:** Epoch math correct, 48-byte format verified, README complete. APPROVED.
+
+### Challenge 27: Port Scanner — README restored
+
+**What I built:** README only; code was already complete. Documented TCP connect scan, worker-pool pattern with channels/goroutines, why timeouts are essential.
+
+**Key pattern:** Worker pool with buffered channels, N goroutines, WaitGroup, separate closer goroutine for clean shutdown.
+
+**Verification:** go vet clean; CGO_ENABLED=0 go test all pass.
+
+**Ellie note:** Timeout non-negotiable, worker-pool textbook, README complete. APPROVED.
+
+### Challenge 28: Netcat — Built from scratch
+
+**What I built:**
+- main.go — CLI parsing, connect/listen mode dispatch.
+- relay.go — bidirectional relay for TCP and UDP, TCP half-close via interface check, UDP deadline-driven termination.
+- Tests: 6 self-contained tests on 127.0.0.1:0.
+
+**Key design decisions:**
+1. One relay core for both TCP and UDP via io.ReadWriter interface.
+2. Half-close via interface check (halfCloser), not protocol flag.
+3. UDP termination by read deadline (normal end of connectionless relay).
+4. udpListenConn adapter wraps UDPConn to satisfy io.ReadWriter.
+5. Test seams take already-bound listener/socket.
+
+**Verification:** go vet clean; CGO_ENABLED=0 go test all 6 pass.
+
+**Ellie note:** Textbook half-close via interface check. Reusable adapter. README complete. APPROVED.
+
+### Environment gotcha (recurring Phase 4)
+
+go1.22.2 / darwin-arm64: importing net pulls cgo; external linker mismatch causes dyld: missing LC_UUID abort. Fix: CGO_ENABLED=0 go test and go build. All four READMEs document this.
+
+### Overall: Phase 4 Wave 1 Complete
+
+Four Go networking challenges, all Ellie-approved: DNS wire format + compression decode, NTP 48-byte + epoch math, concurrent worker-pool scanner, bidirectional TCP/UDP relay.
+
+**Status:** All four approved by Ellie 2026-06-13. Phase 4 networking: 4/7. CURRICULUM.md checkboxes 23/25/27/28 ticked.
