@@ -1,0 +1,11 @@
+# Compiled binaries (module builds to ./webserver; --o web-server also used)
+/webserver
+/web-server
+*.exe
+
+# Go test/build artifacts
+*.test
+*.out
+
+# Editor / OS noise
+.DS_Store

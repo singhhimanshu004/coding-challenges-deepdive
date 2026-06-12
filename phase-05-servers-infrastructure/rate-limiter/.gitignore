@@ -1,0 +1,8 @@
+# Go build artifacts
+/rate-limiter
+*.exe
+*.test
+*.out
+
+# Editor / OS noise
+.DS_Store
