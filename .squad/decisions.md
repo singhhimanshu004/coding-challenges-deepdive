@@ -309,3 +309,142 @@ All three READMEs include: What We're Building → Core Concepts → Architectur
 **traceroute:** `TestTraceIntegration` gated only by `testing.Short()` so plain `go test ./...` makes live call to 8.8.8.8. Self-skips on socket error, cannot fail suite, but gating behind env var (or default-skip) would make default run fully hermetic. Not a blocker.
 
 **Overall:** Phase 4 (Networking) is **COMPLETE** — every challenge in the phase is approved. 25/64 overall challenges done (Phase 1–3 complete, Phase 4 complete, Phase 5–8 pending).
+
+---
+
+## Phase 5, Wave 1 Review: Four Go Server Challenges
+
+**Date:** 2026-06-13
+**Scope:** web-server (#30), memcached-server (#33), nats-message-broker (#34), rate-limiter (#35)
+**Builder:** Malcolm (Content Dev)
+**Reviewer:** Ellie
+**Verification:** `go vet ./...` + `CGO_ENABLED=0 go test ./...` + source review + README quality gate
+
+**All four ✅ APPROVED**
+
+### Challenge 30: Web Server — ✅ APPROVED
+
+**What:** HTTP/1.1 web server over raw TCP at `phase-05-servers-infrastructure/web-server/`. Deliberate choice to NOT use `net/http` on the serving path — instead `net.Listen`/`net.Conn` with hand-rolled request parsing and response framing. Routes `method+path` to handlers, serves static files (Content-Type by extension), defends against path traversal with two-layer defense (lexical `filepath.Clean` + resolved-absolute containment check), and supports HTTP/1.1 keep-alive with per-request read deadlines. CLI: `web-server [--addr :8080] [--root ./public] [--verbose]`.
+
+**Key decisions (reusable pattern):**
+- **`serve(ln net.Listener)` split from `listenAndServe()`** — enables testability: unit tests bind `127.0.0.1:0`, read `ln.Addr()`, drive real requests through the server. No fixed ports, no network flakiness. Reusable for Redis, load balancer.
+- **Keep-alive in per-connection loop** — each `handleConn` arms read deadline, parses, routes, writes response + `Connection` header, loops or returns. Clean EOF/timeout on kept-alive connection = normal, not logged as error (important for noise-free verbose logs).
+- **HTTP/1.0-vs-1.1 keep-alive default flip** — 1.0 closes by default, 1.1 keeps alive by default. Encoded in `request.wantsKeepAlive()`. Made this the single most-called-out protocol detail with a README table + dedicated test cases.
+- **Path traversal = two layers** — lexical `filepath.Clean` AND resolved-absolute containment check against root (with trailing separator to prevent `/srv/www-evil` prefix-bypass). Layer-1 alone is defeatable by symlinks; test sends raw `/../secret.txt` over socket (well-behaved client normalizes `..` away before wire, so this subtlety is a teaching point).
+- **Content-Length frames the body** — announcing body length is precisely what lets the client find the end without connection close, which enables persistent connections. This is the throughline of HTTP/1.1 framing.
+- **Read timeout (`SetReadDeadline`) before every request** — stops idle/slow clients pinning goroutines (slow-loris defense). Also caps total header bytes.
+
+**Testing (fully self-contained):**
+- 10 tests: table-driven parsing, static serve, 404, path-traversal rejection, keep-alive reuse (2 sequential requests over the same socket via `http.ReadResponse`), Connection: close, dynamic route, 405 (method exists for another verb).
+- Tests run on `127.0.0.1:0` (OS picks free port). Raw `/../secret.txt` over socket proves symlink-aware defense.
+
+**Toolchain:** macOS LC_UUID linker bug (importing `net` pulls cgo). Fix: `CGO_ENABLED=0 go test ./...`. Documented in README exactly as curl does.
+
+**Verification:** `go vet ./...` clean; `CGO_ENABLED=0 go test ./...` all pass; manual live run confirmed `/` (200), `/css/style.css` (200, HEAD drops body), `/hello` (dynamic), 404, rejected traversal, 2 requests over single keep-alive.
+
+**Scope limitation:** Content-Length request bodies only (no chunked). Most clients use Content-Length; documented in README as deliberate scope cut. Load Balancer (#31) can sit in front.
+
+**Status:** ✅ Approved.
+
+### Challenge 33: Memcached Server — ✅ APPROVED
+
+**What:** Memcached TEXT protocol server over TCP at `phase-05-servers-infrastructure/memcached-server/`. Commands: set, add, replace, append, prepend, cas, get, gets, delete, incr, decr, flush_all, version, quit. In-memory store with per-item expiry (lazy eviction on access), 32-bit FLAGS field, CAS monotonic version token, goroutine-per-connection concurrency, and O(1) LRU eviction via map + `container/list` under configurable `--max-items` cap. CLI: `memcached [--addr :11211] [--max-items 1000] [--verbose]`.
+
+**Key decisions (reusable):**
+- **Two framing styles in one protocol** — headline teaching point: command lines are delimiter-framed (CRLF), values are length-prefixed (`<bytes>` then exactly that many raw bytes via `io.ReadFull`, then framing CRLF NOT counted). This lets the cache hold opaque binary blobs. Mirrors HTTP Content-Length lesson from curl; cross-linked in README.
+- **Injectable clock** — `Store.now func() time.Time` (default `time.Now`) so expiry tests are deterministic, instant, no `time.Sleep`, no flakiness. Same dependency-injection spirit as curl's injected I/O.
+- **LRU = map + `container/list`** — front=hot, back=cold. Touch-on-access moves to front; insert-past-cap evicts back. Hand-built version of Python's `functools.lru_cache`/`OrderedDict.move_to_end` — called out for cross-language learners.
+- **Single mutex** for clarity. README notes production would shard the map to reduce contention.
+- **Slab allocation** (real memcached): explained conceptually (1 MB pages → fixed-size chunks, ~1.25× growth, per-class LRU, kills fragmentation) and contrasted with simpler Go-heap approach, as the task requested.
+- **Redis contrast table** — blob cache + slabs (memcached) vs. rich-type store + persistence (Redis), since Redis is a separate Phase 5 challenge.
+- **CLI:** stdlib `flag` for long flags (`--addr`, `--max-items`, `--verbose`). Short-flag hand-rolling reserved for Unix-filter challenges with exotic bundling.
+
+**Module structure (reusable Phase 5 pattern):**
+- Named after tool (`module memcached`), `go 1.22`, flat well-named files, thin `main()` → testable `run()`.
+- `.gitignore`: binary, `*.test`, `*.out`, `.DS_Store`.
+- README: 7 sections, links `docs/go-quickstart.md`, 🐍 Python-dev callouts (net.Listener, bufio, container/list, sync.Mutex, goroutines, type assertions).
+
+**Testing:**
+- 24 tests: store unit tests + end-to-end over real local TCP socket.
+- `io.ReadFull` behavior (single `Read` can short-read) called out as key idiom.
+- Injectable clock verifies instant expiry (no sleep).
+
+**Toolchain:** Same macOS LC_UUID issue; `CGO_ENABLED=0 go test ./...` required. Documented in README.
+
+**Verification:** `go vet ./...` clean; `CGO_ENABLED=0 go test ./...` PASS; live smoke test via `nc`: set/get, incr on non-numeric → CLIENT_ERROR, LRU eviction at cap all work.
+
+**Status:** ✅ Approved.
+
+### Challenge 34: NATS Message Broker — ✅ APPROVED
+
+**What:** NATS-style pub/sub message broker over TCP at `phase-05-servers-infrastructure/nats-message-broker/`. Core NATS text protocol: CONNECT/PING/PONG/PUB/SUB/UNSUB/INFO/MSG/+OK/-ERR. Subject routing with `*` (single-token) and `>` (tail, must be last, ≥1 token consumed) wildcards. Queue-group load balancing (plain subs all receive, queue-group members each receive exactly once via round-robin). Per-client goroutine + dedicated write loop for safe serialization. No external dependencies (real `nats.go` deliberately not imported). CLI: `nats-broker [--addr :4222] [--verbose]`.
+
+**Key decisions (reusable):**
+- **Two framing styles in one protocol** — headline: control lines newline-delimited; payloads length-prefixed (binary data can contain newlines). Single idea beginners most need to internalize. Same lesson as memcached + curl.
+- **Subject matching = core** — isolated in `subject.go` with table-driven test. Wildcard rules crisp and verifiable (`*` = one token, `>` = tail + must-be-last + ≥1 token; so `foo.>` does NOT match `foo`).
+- **Fan-out vs queue groups** — plain subs all get copy; queue-group members each get exactly one (fan-in). Both can coexist for same subject. Made both clear in tests + README.
+- **At-most-once, no persistence** — dropping frame to slow/gone consumer = feature, not error. Implemented via `select` on quit channel in `enqueue` — at-most-once semantics.
+- **Registry = `map[*client]map[sid]*subscription`** — O(1) disconnect, O(n) routing scan. README notes production NATS uses subject trie. Flat scan is right call for learning.
+- **Queue-group selection round-robin** — via server counter. Map iteration order non-deterministic, but "exactly one" always holds.
+- **`--verbose` flag** gates `+OK`. Honors `verbose` in CONNECT JSON via substring check (not full parse — adequate for core). Simplification noted in README.
+
+**Go idioms for Python/Java dev:**
+- Goroutine per connection (cheap threads); channel + dedicated writer goroutine per client for serialized socket writes.
+- `bufio.Reader.ReadString('\n')` for line framing, `io.ReadFull` + `Discard(2)` for length-prefixed payload.
+- README links `docs/go-quickstart.md`, sprinkles 🐍 callouts.
+
+**Testing:**
+- Table-driven `subject.go` tests: wildcard match/non-match, `>` tail semantics.
+- Integration tests: queue-group single delivery, unsub stops delivery, broker bound on `127.0.0.1:0`.
+
+**Toolchain:** Same macOS LC_UUID issue; `CGO_ENABLED=0 go test ./...` required. Documented in README.
+
+**Verification:** `go vet ./...` clean; `CGO_ENABLED=0 go test ./...` PASS; `CGO_ENABLED=0 go build` succeeds.
+
+**Scope note:** Single NATS protocol server; original stub `nats-message-broker/` (untouched) plus completed `nats-broker/` now both exist in Phase 5. Canonical build is `nats-message-broker/` (new stub replaced with actual code).
+
+**Status:** ✅ Approved.
+
+### Challenge 35: Rate Limiter — ✅ APPROVED
+
+**What:** HTTP rate limiter in Go with four algorithms behind one `Limiter` interface at `phase-05-servers-infrastructure/rate-limiter/`. Algorithms: token bucket, leaky bucket, fixed window, sliding-window log. Exposed as `net/http` middleware returning 429 Too Many Requests + `Retry-After` + `X-RateLimit-*` headers. CLI demo server: `rate-limiter [--algo token-bucket|leaky-bucket|fixed-window|sliding-window] [--rate 10] [--burst 5] [--window 1m] [--addr :8080]`. Table-driven deterministic test suite.
+
+**Key decisions (reusable pattern):**
+- **One small interface, many strategies** — `Limiter.Allow(key) Decision` is the contract. Middleware, CLI, tests never reference concrete algorithm. `--algo` flag swaps implementations zero downstream changes. Central teaching point; mirrors how future Redis-backed limiter would slot in.
+- **Injectable clock** — every algorithm reads "now" via `Clock` interface. Tests use hand-advanced fake clock (`clk.Advance(...)`) instead of real sleeps. Fast, flake-free. Highest-value pattern in the challenge; leaned on heavily in README.
+- **Lazy refill** (no background goroutines/timers) — buckets compute accrued tokens on access (`elapsed × rate`). Exact, zero cost while idle, no cleanup needed.
+- **Fixed window aligned to boundaries** — truncate `now` to window. Classic **boundary-burst** flaw is real and directly demonstrated in test (contrast against exact sliding-window log).
+- **Distributed considerations** in README — shared Redis state, atomic check-increment via Lua, clock skew. Emphasized: scaling changes *where state lives*, not the algorithm itself. Natural tie-in to Phase 5 Redis Server.
+
+**Go idioms for Python/Java dev:**
+- Structural interfaces (no `implements` keyword), `http.Handler` middleware = decorator pattern, `sync.Mutex` vs GIL (Go has real parallelism), `defer` unlock.
+
+**Testing:**
+- Table-driven: burst+refill, window boundaries, per-key isolation, 429 middleware path + post-refill recovery.
+- All tests use fake clock — zero `time.Sleep`, fully deterministic.
+
+**Verification:** `go vet ./...` pass; `CGO_ENABLED=0 go test ./...` pass; `gofmt -l .` clean; manual: demo server `--rate 2 --burst 3` → six rapid curls return `200 200 200 429 429 429`; 429 carries `Retry-After: 1`, `X-RateLimit-Limit: 3`, `X-RateLimit-Remaining: 0`.
+
+**Toolchain:** macOS LC_UUID issue (importing `net/http`). Fix: `CGO_ENABLED=0` for both test and build. Documented in README Testing Strategy section, matching curl. Worth standardizing this note across all Go challenges importing `net`/`net/http`/`crypto/tls`.
+
+**Status:** ✅ Approved.
+
+### README Quality Gate (all four pass)
+
+All four READMEs include: What We're Building → Core Concepts → Architecture → Step-by-Step → Testing → Key Takeaways → Further Reading. Explain Go idioms for Python dev (🐍→🐹 callouts: net.Listener, bufio, container/list, sync.Mutex, goroutines, type assertions, interfaces, channels). Link `docs/go-quickstart.md`. Document `CGO_ENABLED=0` toolchain workaround consistently.
+
+### Non-blocking nice-to-haves (not required)
+
+- **web-server:** Only Content-Length request bodies (no chunked). Documented; deliberate scope cut.
+- **nats-message-broker:** `max_payload` advertised in INFO but not enforced on PUB.
+
+Neither blocks the verdict.
+
+### Phase 5 Wave 1 Summary
+
+**All four challenges ✅ APPROVED** — 29/64 overall challenges complete (Phases 1–4 complete, 4/7 Phase 5 complete).
+
+**Curriculum status:** CURRICULUM.md checkboxes #30/#33/#34/#35 ticked by Coordinator.
+
+**Next wave:** Phase 5 Wave 2 (load-balancer #31, redis-server #32, and docker #38 optional).
+

@@ -433,3 +433,97 @@ Phase 4 is now end-to-end as a learning arc: curl → DNS wire format + NTP epoc
 **Total Phase 4:** 7/7 challenges approved. First four (23/25/27/28) approved 2026-06-13 morning; final three (24/26/29) approved 2026-06-13 end of wave.
 
 **Curriculum status:** 25/64 challenges complete (Phases 1–4 complete; Phases 5–8 pending).
+
+---
+
+## Phase 5: Servers & Infrastructure (4/7 Wave 1 — Go)
+
+### Challenges 30, 33, 34, 35 — Four Go Server Challenges (2026-06-13)
+
+**Status:** ✅ Completed and Ellie-approved.
+
+All four servers built from scratch over raw TCP sockets, no external dependencies (deliberate choice). Key thread: **framing styles and concurrency patterns are reusable across server builds**.
+
+#### Reusable Patterns from Phase 5 Wave 1
+
+1. **`serve(ln net.Listener)` split from `listenAndServe()`** — testability game-changer. Unit tests bind `127.0.0.1:0`, read `ln.Addr()`, drive real requests. Zero fixed ports, zero network flakiness. Reusable for all Phase 5 servers (Redis #32, load-balancer #31) and beyond.
+
+2. **Two framing styles in one protocol** — the universal lesson:
+   - Control frames: delimiter-framed (CRLF newline).
+   - Payloads: length-prefixed (read exactly N bytes, then CRLF).
+   - Enables binary-safe data in both memcached and NATS.
+
+3. **Injectable clock (`Clock` interface, default `time.Now`)** — deterministic testing without `time.Sleep`. Tests advance clock by hand. Applied in: rate-limiter (all four algorithms), memcached (TTL expiry), DNS forwarder (#24, Phase 4). Becoming a phase-5 standard.
+
+4. **Per-connection concurrency pattern:**
+   - Goroutine-per-connection (cheap threads).
+   - Dedicated write goroutine per client (channel-based, serialized socket writes).
+   - Single `sync.Mutex` for critical sections (subscription registry, cache access).
+   - Applied: web-server, memcached-server, nats-broker.
+
+5. **LRU via map + `container/list`** — hand-built version of Python's `functools.lru_cache`. Front=hot, back=cold. Touch-on-access moves front. Past-cap evicts back. O(1) ops. Memcached-specific but reusable pattern for any bounded cache.
+
+6. **Lazy refill, no background tasks** — rate-limiter: compute token accrual on access (`elapsed × rate`). Zero background goroutines/timers. Exact, zero idle cost. Philosophy: computation on demand beats background cleanup.
+
+7. **`CGO_ENABLED=0` as Phase 5 standard** — all four challenges import `net` or `net/http`, all hit macOS LC_UUID linker bug (cgo resolver mismatch with Xcode CLT). Fix is universal. Updated README toolchain note in each; worth standardizing across all Phase 5 Go challenges.
+
+8. **Go idioms for Python/Java learners** — called out consistently:
+   - Goroutines (cheap) vs threads/asyncio.
+   - `bufio.Reader` + `ReadString('\n')` = readline.
+   - `sync.Mutex` vs GIL (Go has real parallelism).
+   - Structural interfaces (no `implements` keyword).
+   - `http.Handler` middleware = decorator pattern.
+   - `io.ReadFull` for fixed-length bodies (single `Read` can short-read).
+
+#### Challenge 30: Web Server
+
+- **Raw TCP, hand-rolled HTTP/1.1:** `net.Listen`, goroutine per connection, parse request line/headers/body by hand, frame responses with CRLF, route method+path to handlers, serve static files (Content-Type by extension), 404/405/501 semantics, path-traversal defense (two layers: lexical + resolved-abs containment), keep-alive with read deadlines (slow-loris defense).
+- **Key reusable:** `serve(listener)` split enables unit testing with `127.0.0.1:0`.
+- **HTTP/1.0 vs 1.1 keep-alive flip:** 1.0 closes by default, 1.1 keeps by default. Made this the single most-called-out protocol detail (README table + test cases).
+- **10 tests:** parsing, static, 404, traversal rejection, keep-alive reuse, Connection:close, dynamic route, 405.
+- **Verification:** `go vet` clean, `CGO_ENABLED=0 go test` PASS.
+
+#### Challenge 33: Memcached Server
+
+- **TEXT protocol over TCP:** set/add/replace/append/prepend/cas/get/gets/delete/incr/decr/flush_all.
+- **Two framing styles:** command lines (CRLF), values (length-prefixed).
+- **Store:** map + container/list LRU (O(1)), per-item expiry (lazy eviction), 32-bit FLAGS, CAS token, goroutine per connection.
+- **Injectable clock:** deterministic expiry tests (no sleeps).
+- **LRU:** hand-built map+list = Python `functools.lru_cache` equivalent.
+- **24 tests:** unit + end-to-end TCP.
+- **Verification:** `go vet` clean, `CGO_ENABLED=0 go test` PASS.
+
+#### Challenge 34: NATS Message Broker
+
+- **NATS text protocol:** CONNECT/PING/PONG/PUB/SUB/UNSUB/INFO/MSG/±OK.
+- **Subject routing:** `*` (one token), `>` (tail, must be last, ≥1 token). Isolated in `subject.go` with table-driven test.
+- **Concurrency:** goroutine per client, dedicated write loop, channel-based dispatch, single mutex over registry (held only while building recipient list).
+- **Fan-out vs queue groups:** plain subs all receive; queue groups: exactly one per group (round-robin).
+- **At-most-once:** slow consumer drops = feature, not error (select on quit channel).
+- **Verification:** `go vet` clean, `CGO_ENABLED=0 go test` PASS.
+
+#### Challenge 35: Rate Limiter
+
+- **Four algorithms:** token bucket, leaky bucket, fixed window, sliding-window log — all behind one `Limiter` interface.
+- **Exposed as `net/http` middleware** → 429 + `Retry-After` + `X-RateLimit-*` headers.
+- **Injectable clock:** fake clock advances in tests (zero sleeps).
+- **Lazy refill:** compute token accrual on access (no background tasks).
+- **Fixed window flaw:** boundary-burst is real and demonstrated in test (contrast sliding-window).
+- **Verification:** `go vet` clean, `CGO_ENABLED=0 go test` PASS.
+
+#### Phase 5 Progress
+
+- **Cumulative:** 4/7 Phase 5 challenges complete (web-server, memcached, NATS, rate-limiter).
+- **Overall:** 29/64 total challenges.
+- **Next wave:** load-balancer (#31), redis-server (#32), docker (#38, optional).
+
+#### Recurring Technical Debt & Observations
+
+1. **macOS `CGO_ENABLED=0` is now universal** — every Go challenge importing `net`/`net/http`/`crypto/tls` hits the LC_UUID linker bug. Worth adding to a global "Go Quickstart" FAQ or pre-check script.
+
+2. **Two-framing-styles lesson generalized** — appears in curl (HTTP Content-Length), memcached, NATS, DNS (variable-length name compression pointers). This is a canonical lesson across the curriculum.
+
+3. **Injected time/clock = de facto standard** — DNS forwarder, rate-limiter, memcached all use it. Consider adding to `docs/go-quickstart.md` as idiomatic test pattern.
+
+4. **`serve(listener)` split reusable** — already applies to web-server; same pattern fits redis-server, load-balancer, future proxy servers. Recommend codifying in docs.
+

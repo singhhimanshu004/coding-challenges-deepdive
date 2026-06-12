@@ -300,3 +300,18 @@ default-skip) would make the default run fully hermetic. Not a blocker.
 
 Verdicts written to `.squad/decisions/inbox/ellie-phase4-wave2-review.md`.
 **Phase 4 (Networking) is COMPLETE — all challenges approved.**
+
+### 2026-06-13 — Review: Phase 5 Wave 1 — four Go server challenges — ✅ ALL APPROVED
+
+Independently ran `go vet ./...` + `CGO_ENABLED=0 go test ./...` in each dir — all clean/PASS. No external deps in any go.mod (confirmed: no nats.go, no test frameworks; all stdlib).
+
+- **web-server (#30) ✅** — HTTP/1.1 served from RAW TCP (net.Listen accept loop, goroutine-per-conn), NOT net/http on the serving path. Hand-rolled request-line/header/body parsing (CRLF, Content-Length via io.ReadFull, maxHeaderBytes cap), correct response framing, exact method+path routing with 404/405/501, static files with extension→MIME map + index.html, HEAD drops body. Path traversal: two-layer defense (filepath.Clean + absRoot+sep containment check → 403). Keep-alive honors HTTP/1.0 vs 1.1 default flip + read deadline. Tests on 127.0.0.1:0 prove keep-alive (2 sequential reqs, same socket via http.ReadResponse), raw `/../secret.txt` rejected (no leak), 404, content-type.
+- **memcached-server (#33) ✅** — TEXT protocol over TCP; set/get/gets/add/replace/append/prepend/cas/delete/incr/decr/flush_all with STORED/END/VALUE/DELETED framing + noreply. Store uses map + container/list for O(1) LRU; lazy expiry (liveLocked reaps on access); CAS via monotonic token; memcached exptime quirk (relative ≤30d vs absolute); incr wraps, decr floors at 0. Injectable clock. Tests prove set→get, miss→END, delete, incr/decr, expiry (clock advance), LRU evicts coldest at cap (with and without touch).
+- **nats-message-broker (#34) ✅** — text protocol CONNECT/PING-PONG/PUB/SUB/UNSUB/MSG/INFO/+OK/-ERR, goroutine-per-client + writeLoop. matchSubject correct: `*` single token, `>` tail (must be last + ≥1 remaining token, so `foo.>` ≠ `foo`). Queue groups: plain subs all delivered, each group picks exactly one via round-robin counter; enqueue outside lock. Does NOT import real nats.go. Tests prove wildcard match/non-match, `>` tail, queue-group single delivery, unsub stops delivery.
+- **rate-limiter (#35) ✅** — token bucket, sliding window, fixed window, leaky bucket behind one Limiter interface; per-key maps; injectable Clock (fakeClock.Advance, ZERO time.Sleep in tests). net/http middleware sets X-RateLimit-* + Retry-After, returns 429 via httptest. Token bucket lazy refill with float tokens. Tests deterministic: burst+refill, window boundaries, per-client isolation, 429 + recovery.
+
+READMEs: all 4 clear the gate — 7 mandated sections, go-quickstart.md link, 🐍 Python-analogy teaching, CGO_ENABLED=0/LC_UUID workaround documented. Did NOT reject over the cgo abort (used CGO_ENABLED=0 per toolchain note).
+
+Non-blocking nice-to-haves: web-server only supports Content-Length bodies (no chunked) — documented; nats max_payload advertised in INFO but not enforced on PUB. Neither is a blocker.
+
+Verdicts written to .squad/decisions/inbox/ellie-phase5-wave1-review.md.
