@@ -1,0 +1,8 @@
+# Go build artifacts
+/port-scanner
+*.exe
+*.test
+*.out
+
+# Editor / OS noise
+.DS_Store

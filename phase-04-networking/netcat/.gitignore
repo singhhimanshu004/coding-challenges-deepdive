@@ -1,0 +1,9 @@
+# Go build artifacts
+/nc
+/netcat
+*.exe
+*.test
+*.out
+
+# Editor / OS noise
+.DS_Store
