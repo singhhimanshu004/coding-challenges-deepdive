@@ -527,3 +527,50 @@ All four servers built from scratch over raw TCP sockets, no external dependenci
 
 4. **`serve(listener)` split reusable** — already applies to web-server; same pattern fits redis-server, load-balancer, future proxy servers. Recommend codifying in docs.
 
+
+#### Challenge 31: Load Balancer
+
+- **HTTP reverse-proxy:** listens on one addr, picks healthy backend per request, forwards + streams response. `httputil.ReverseProxy` for mechanics; hand-wrote scheduling algorithms + health checks (the lesson).
+- **Scheduler interface** = Strategy pattern: RoundRobin / LeastConn / Random / WeightedRoundRobin all satisfy `Next([]*Backend) *Backend`. Balancer never branches on algorithm name.
+- **Pool filters health; schedulers health-blind:** `HealthyBackends()` returns only live backends, so round-robin "skipping" is automatic.
+- **Active + passive health:** Active = `time.Ticker` probing `/health` (brings backends back). Passive = ReverseProxy `ErrorHandler` marking DOWN on real failure (fails OUT in ms).
+- **Counter lifetime via `defer`:** `acquire()` then `defer release()` ensures active count stays high for request duration. That's what makes least-connections meaningful.
+- **Atomics vs mutex split:** Per-backend `alive` (atomic.Bool) + `active` (atomic.Int64) on hot path; `sync.RWMutex` only around backend *list*.
+- **11 tests:** round-robin, least-conn, weighted, health check, 503 when all down, passive mark-down, CLI parsing.
+- **Verification:** `CGO_ENABLED=0 go test ./...` all 11 pass.
+
+#### Challenge 32: Redis Server (XL)
+
+- **RESP2 protocol from scratch:** hand-rolled encoder/decoder, TCP goroutine-per-connection, in-memory store, expiry (lazy + active), RDB snapshot persistence.
+- **Two framing styles headline:** delimiter framing (simple strings/errors/integers, read until CRLF) + length-prefix framing (bulk strings/arrays, header says bytes/elements). Binary-safe bulk strings. Same lesson as HTTP Content-Length + Memcached (cross-linked).
+- **One tagged `Value` struct** vs interface hierarchy: keeps `Marshal` as single switch, makes byte-exact tests trivial.
+- **`io.ReadFull` for TCP short-read fix:** read exactly len+2 bytes for bulk string body.
+- **Dispatch via `map[string]commandHandler`:** idiomatic Go, adding command is one map entry.
+- **`sync.RWMutex` + no GIL:** RLock for KEYS/TTL (no mutation); Lock for writers + lazy-delete. Go has real parallelism so lock is mandatory correctness, not politeness (concurrent map write = crash).
+- **Expiry = lazy + active both:** Lazy delete inside Get/Set; background sweeper on `time.Ticker` bounds memory for never-read keys.
+- **Injectable clock:** `Store.now func() time.Time` for deterministic expiry tests (zero sleeps).
+- **RDB snapshot = custom text format:** atomic temp-file + `os.Rename` for crash safety; load-on-start + save-on-shutdown + explicit SAVE/BGSAVE.
+- **Graceful shutdown:** `quit` channel + `sync.WaitGroup`, `Close` guarded by `sync.Once` to avoid double-close panic.
+- **42 tests:** codec, store, TCP round-trip, active sweep, save/reload with TTL, race detection. `CGO_ENABLED=0 go test -race ./...` PASS.
+- **Note:** Phase 7 Challenge 47 (Redis CLI) will be RESP *client* + REPL talking to THIS server. Wire contract fixed here.
+
+#### Challenge 36: Docker (CAPSTONE, Linux-only)
+
+- **Container runtime = Linux process + namespaces + cgroups:** UTS + PID + mount + network + IPC namespaces, `pivot_root` into rootfs, fresh `/proc`, hostname, memory/pids limits (v1 + v2), exec user command as PID 1.
+- **Linux-only solved via build tags:** `run_linux.go` + `cgroup_linux.go` have `//go:build linux`; `run_other.go` is `//go:build !linux` (stub returns clear error naming GOOS/GOARCH). Pure logic in `main.go`/`config.go`/`layers.go` (no tag) compiled everywhere. Tests split same way.
+- **Re-exec trick = heart of it:** Go can't safely `fork()` from multi-threaded runtime, so parent sets `SysProcAttr.Cloneflags` + re-executes `/proc/self/exe child …`; child finishes setup *inside* new namespaces. ASCII diagram + full prose.
+- **Config crosses re-exec via argv:** `childArgs(cfg)` → `child --membytes N --pids N --hostname H <rootfs> <cmd> [args]`; `parseChildArgs` parses back. Round-trip unit test is safety net.
+- **Resolve units in parent:** `--mem 100m` → bytes in parent; child sees only `--membytes` int. Keeps modes in sync, child code unit-free.
+- **`flag` stops at first positional:** container command like `/bin/ls -la` keeps own `-la`. Dedicated test.
+- **`pivot_root` over `chroot`:** canonical 4-step (make private, bind-mount self, pivot_root, detach old root). chroot is escapable; real runtimes use pivot_root.
+- **cgroup v1 AND v2:** detect v2 by presence of `/sys/fs/cgroup/cgroup.controllers`; write `memory.max`/`pids.max` for v2 or `memory.limit_in_bytes` tree for v1.
+- **OverlayFS path math testable cross-platform:** `layers.go` reverses base-first order, renders `lowerdir=…,upperdir=…,workdir=…` option string — unit-tested on macOS even though mount is Linux-only.
+- **User namespace documented-but-off:** `CLONE_NEWUSER` + uid/gid mappings as commented code (fights with `/proc` mount + `CLONE_NEWNET` on some kernels).
+- **10 platform-neutral tests:** parseSize, parseRunArgs (flags-after-cmd, defaults, missing-arg), childArgs round-trip, dispatch, overlay layout. All pass on macOS.
+- **Verification:** `GOOS=linux go build ./...` succeeds (cross-compile). Linux recipe in README: export alpine rootfs, `sudo ./gocker run … /bin/sh`, prove isolation with `hostname`/`ps`/`ls /`.
+
+#### Phase 5 Milestone
+
+- **All 7/7 Phase 5 challenges complete** (web-server, memcached, NATS, rate-limiter, load-balancer, redis-server, docker).
+- **32/64 overall challenges (50% curriculum complete).**
+- **All three Wave 2 challenges APPROVED by Ellie.**

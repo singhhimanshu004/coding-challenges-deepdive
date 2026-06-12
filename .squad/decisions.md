@@ -448,3 +448,92 @@ Neither blocks the verdict.
 
 **Next wave:** Phase 5 Wave 2 (load-balancer #31, redis-server #32, and docker #38 optional).
 
+
+---
+
+## Phase 5 Wave 2 — Load Balancer, Redis Server, Docker (Capstone)
+
+### Challenge 31: Load Balancer — ✅ APPROVED
+
+**What:** HTTP reverse-proxy load balancer in Go at `phase-05-servers-infrastructure/load-balancer/`. CLI: `load-balancer [--addr :8080] [--backends url1,url2,...] [--algo round-robin|least-conn|random|weighted] [--health-interval 5s] [--health-path /health] [--health-timeout 2s] [--verbose]`.
+
+**Key decisions (reusable):**
+- **Borrow the proxying, hand-write the lesson:** Used `httputil.NewSingleHostReverseProxy` for mechanics (already hand-rolled HTTP rewriting in #29) and hand-wrote the scheduling algorithms + health-check loop — where the lesson lives. Boundary called out explicitly in README.
+- **Scheduler interface, not a switch:** One method `Next([]*Backend) *Backend`. RoundRobin / LeastConn / Random / WeightedRoundRobin satisfy it. Balancer never branches on algorithm name; only `newScheduler()` does. Strategy pattern reused from earlier Go challenges.
+- **Pool filters health; schedulers stay health-blind:** `HealthyBackends()` returns only live backends in pool order, so round-robin "skipping" is automatic and each scheduler stays tiny.
+- **Active AND passive health checking — headline concept:** Active = `time.Ticker` goroutine probing `GET /health` (detects recovery, brings backends back). Passive = ReverseProxy `ErrorHandler` marking backend DOWN on real forward failure. Production runs both: passive fails OUT in ms, active fails BACK IN.
+- **Counter lifetime = request lifetime via `defer`:** `acquire()` then `defer release()` keeps active count high for exactly as long as the backend is busy (even on panic/client disconnect). That's what makes least-connections meaningful.
+- **Atomics vs mutex split:** Per-backend `alive` (atomic.Bool) and `active` (atomic.Int64) on hot path; `sync.RWMutex` only around backend *list*.
+
+**Testing:**
+- Deterministic health without sleeps: each httptest backend exposes toggleable `/health` (200 ↔ 503); health loop exposes `CheckAll(ctx)` for exactly one probe sweep. No ticker timing, no flakiness.
+- Least-connections tested by setting counters directly (deterministic, fast).
+- End-to-end: 2-3 real backends, assert on `X-Served-By` labels, status, headers, body.
+- **11 tests:** round-robin order, end-to-end spread, least-conn, weighted 3:1, proxying preserves body/header/status, unhealthy skipped + recovered, 503 when all down, passive mark-down, table-driven CLI parsing.
+
+**Verification:** `CGO_ENABLED=0 go vet ./...` clean; `CGO_ENABLED=0 go test ./...` all 11 pass; `gofmt -l .` clean; `CGO_ENABLED=0 go build -o load-balancer .` succeeds.
+
+**Status:** ✅ Approved.
+
+### Challenge 32: Redis Server (XL) — ✅ APPROVED
+
+**What:** From-scratch Redis-compatible server speaking RESP2 protocol over raw TCP at `phase-05-servers-infrastructure/redis-server/`. Hand-rolled protocol encoder/decoder, concurrency-safe in-memory store, key expiry (lazy + active), RDB-style snapshot persistence. Commands: PING, ECHO, SET (EX/PX/NX/XX), GET, GETSET, APPEND, MGET, MSET, DEL, EXISTS, KEYS, EXPIRE, TTL, INCR, DECR, SAVE, BGSAVE, COMMAND.
+
+**Key decisions (reusable):**
+- **RESP's two framing styles = headline lesson:** Mixes delimiter framing (simple strings/errors/integers — read until CRLF) with length-prefix framing (bulk strings/arrays — header says bytes/elements). Length-prefixing makes bulk strings binary-safe (body may contain CRLF/NUL). Same idea as HTTP Content-Length and Memcached; cross-linked across challenges.
+- **One tagged `Value` struct** (typ byte + str/num/array/null fields) instead of interface hierarchy — keeps `Marshal` a single switch, makes byte-exact tests trivial. Constructors (`BulkString`, `NullBulk`, `Array`, …) keep handlers readable.
+- **`io.ReadFull` for bulk-string bodies** — read exactly len+2 bytes; the standard fix for "single TCP read may short-read."
+- **Dispatch via `map[string]commandHandler`** — idiomatic Go; adding a command is one map entry.
+- **`sync.RWMutex` over keyspace map:** reads take RLock (KEYS/TTL don't mutate); writers + lazy-delete take Lock. README flags that production would shard the map. Go has no GIL so lock is mandatory correctness, not politeness (concurrent map write = hard crash).
+- **Expiry = lazy + active, deliberately both:** Lazy delete inside Get/Set for correctness-on-access; background goroutine on `time.Ticker` calling `SweepExpired` to bound memory for never-read keys. Neither alone is enough.
+- **Injectable clock** — `Store.now func() time.Time` (default `time.Now`) so expiry unit tests advance time instantly (zero `time.Sleep`, zero flakiness).
+- **RDB snapshot = OUR OWN simple length-prefixed text format** — explicitly NOT binary-compatible with real Redis .rdb (no opcodes/LZF/CRC64). Atomic temp-file + `os.Rename` for crash safety. Load-on-start + save-on-shutdown (signal-driven) plus explicit SAVE/BGSAVE.
+- **Graceful shutdown:** `quit` channel + `sync.WaitGroup`, `Close` guarded by `sync.Once` so explicit-Close-then-Cleanup pattern doesn't double-close the channel.
+
+**Testing:**
+- **42 test cases:** codec (all 5 RESP types + null forms), store (set/get/expiry/lazy-delete), TCP server round-trip, active sweep, save/reload with TTL survival, race detection.
+- `CGO_ENABLED=0 go test -race ./...` PASS (locking is sound).
+- Live smoke test via `nc`: PING→PONG, SET/GET round-trip, SAVE produced readable snapshot.
+
+**Verification:** `go vet ./...` clean; `CGO_ENABLED=0 go test ./...` PASS (42 tests); `CGO_ENABLED=0 go test -race ./...` PASS.
+
+**Note for Phase 7 (Challenge 47 — Redis CLI):** That challenge is a RESP *client* + REPL talking to THIS server. Wire contract fixed here: client sends array of bulk strings, reads exactly one RESP value, `$-1`/`*-1` as null. Can reuse this server's `resp.go` framing as reference (or port it).
+
+**Status:** ✅ Approved.
+
+### Challenge 36: Docker (CAPSTONE, Linux-only) — ✅ APPROVED
+
+**What:** Minimal container runtime in Go at `phase-05-servers-infrastructure/docker/` (`gocker run [--mem 100m] [--pids 50] [--hostname name] <rootfs> <cmd> [args...]`). Shows a container is just a normal Linux process given a different view of the world (namespaces) and a spending limit (cgroups). Creates UTS + PID + mount + network + IPC namespaces, `pivot_root`s into image rootfs, mounts fresh `/proc`, sets hostname, applies memory/pids cgroup limits (v1 and v2), then exec's user command as PID 1. README-first with 7 sections and 🐧 Linux-only badge.
+
+**Key decisions (reusable for cross-platform challenges):**
+- **Build-tag split solves Linux-only on macOS dev box:** Namespaces/cgroups/pivot_root/OverlayFS are Linux kernel features that don't exist on Darwin. Solved with Go build tags:
+  - `run_linux.go`, `cgroup_linux.go` → `//go:build linux` (real syscalls).
+  - `run_other.go` → `//go:build !linux` (stub returning clear "this only runs on Linux — you are on darwin/arm64…" error).
+  - `main.go`, `config.go`, `layers.go` → **no tag**, pure logic, compiled everywhere.
+  - Tests split same way: `config_test.go` + `layers_test.go` run on macOS; `run_linux_test.go` is `//go:build linux` with `t.Skip()` unless root.
+- **The re-exec trick is the heart:** Go can't safely `fork()` from multi-threaded runtime, so parent sets `SysProcAttr.Cloneflags` and re-executes `/proc/self/exe child …`; child finishes setup *inside* new namespaces. ASCII diagram + full prose explanation provided.
+- **Config crosses re-exec boundary via argv:** `childArgs(cfg)` serializes to `child --membytes N --pids N --hostname H <rootfs> <cmd> [args]`; `parseChildArgs` parses it back. Round-trip unit test (`parseChildArgs(childArgs(cfg)) == cfg`) is safety net — if that breaks, containers launch with wrong limits.
+- **Resolve units once, in parent:** `--mem 100m` → bytes in parent; child only sees integer `--membytes`. Keeps modes in sync, child code unit-free.
+- **`flag` stops at first positional** — exactly what we want: container command like `/bin/ls -la` keeps own `-la` instead of gocker stealing it. Dedicated test + README callout.
+- **`pivot_root` over `chroot`:** Implemented canonical 4-step dance (make private → bind-mount self → pivot_root → detach old root) and explained why chroot is escapable. Real runtimes use pivot_root.
+- **cgroup v1 AND v2:** Detect v2 by presence of `/sys/fs/cgroup/cgroup.controllers`; write `memory.max`/`pids.max` for v2 or the `memory.limit_in_bytes` / per-controller tree for v1.
+- **OverlayFS path math is testable slice of image story:** `layers.go` reverses base-first order into overlay's highest-priority-first lowerdir, renders `lowerdir=…,upperdir=…,workdir=…` option string — unit-tested on macOS even though mount itself is Linux-only.
+- **User namespace left documented-but-off:** `CLONE_NEWUSER` + uid/gid mappings included as commented code with explanation (fights with mounting `/proc` and `CLONE_NEWNET` on some kernels).
+
+**Testing:**
+- **10 platform-neutral tests** (all pass on macOS): parseSize, parseRunArgs (flags-after-cmd, defaults, missing-arg), childArgs round-trip, dispatch unknown/help, overlay layout + mount options + path cleaning.
+- Linux tests are tag-excluded on macOS.
+
+**Verification (macOS):**
+- `gofmt -l .` clean.
+- `go vet ./...` passes.
+- `CGO_ENABLED=0 go test ./...` all 10 neutral tests pass.
+- `GOOS=linux go build ./...` succeeds (real runtime cross-compiles).
+- README documents: Linux-only at top with how-to-run-on-Linux recipe (export rootfs, build, run privileged, integration test isolation with `hostname`/`ps`/`ls /`); teaches namespaces (incl. re-exec), cgroups, chroot vs pivot_root, OverlayFS.
+
+**Linux verification (not done here; documented in README):**
+- Export alpine rootfs, build for Linux, `sudo ./gocker run … /bin/sh`, then prove isolation with `hostname` / `ps` / `ls /` / `cat /etc/os-release`.
+
+**Status:** ✅ Approved. Phase 5 (Servers & Infrastructure) COMPLETE (7/7).
+
+**Overall:** All three APPROVED. 32/64 overall challenges complete; Phase 5 done.
