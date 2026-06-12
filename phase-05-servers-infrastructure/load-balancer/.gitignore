@@ -1,0 +1,11 @@
+# Compiled binary (module builds to ./loadbalancer; -o load-balancer also used)
+/loadbalancer
+/load-balancer
+*.exe
+
+# Go test / build artifacts
+*.test
+*.out
+
+# Editor / OS noise
+.DS_Store

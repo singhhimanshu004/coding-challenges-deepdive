@@ -1,0 +1,14 @@
+# Compiled binary
+/gocker
+*.exe
+
+# Go test / build artifacts
+*.test
+*.out
+coverage.*
+
+# Container scratch space created at runtime
+/rootfs-*/.pivot_old
+
+# Editor / OS noise
+.DS_Store

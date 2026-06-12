@@ -166,12 +166,12 @@ For **every** challenge, you write the teaching README *before* the code. This i
 | # | Challenge | Diff | Lang | ⏱️ | Why this language / what it teaches | ✅ |
 |---|-----------|------|------|----|-------------------------------------|----|
 | 30 | **Web Server** | 🟠 | 🟦 Go | L | HTTP/1.1 from scratch: request parsing, routing, static files, keep-alive. The server counterpart to `curl`. | [x] |
-| 31 | **Load Balancer** | 🟠 | 🟦 Go | L | Reverse proxy with health checks and round-robin / least-connections scheduling. Depends on #30. | [ ] |
-| 32 | **Redis Server** | 🟠 | 🟦 Go | XL | The RESP protocol, an in-memory key-value store, key expiry, and persistence. Reuses Phase 1 parsing. | [ ] |
+| 31 | **Load Balancer** | 🟠 | 🟦 Go | L | Reverse proxy with health checks and round-robin / least-connections scheduling. Depends on #30. | [x] |
+| 32 | **Redis Server** | 🟠 | 🟦 Go | XL | The RESP protocol, an in-memory key-value store, key expiry, and persistence. Reuses Phase 1 parsing. | [x] |
 | 33 | **Memcached Server** | 🟠 | 🟦 Go | L | Text/binary protocol + LRU eviction & slab-allocation concepts; instructive contrast to Redis. | [x] |
 | 34 | **NATS Message Broker** | 🟠 | 🟦 Go | L | Pub/sub, subject routing, client lifecycle, and delivery semantics. | [x] |
 | 35 | **Rate Limiter** | 🔵→🟠 | 🟦 Go | M | Token-bucket & sliding-window algorithms as reusable middleware; distributed considerations. | [x] |
-| 36 | **Docker** | 🔴 | 🟦 Go | XL | Linux namespaces, cgroups, and layered filesystems — what a container *actually* is. | [ ] |
+| 36 | **Docker** | 🔴 | 🟦 Go | XL | Linux namespaces, cgroups, and layered filesystems — what a container *actually* is. | [x] |
 
 **🎓 The server learning arc:** every server challenge follows the same four steps — (1) read the protocol spec, (2) build a minimal single-connection version, (3) add concurrency, (4) add persistence/advanced features. This mirrors how real infrastructure evolves. Build the **Web Server before the Load Balancer** (you need a backend to balance) and the **Redis Server before the Redis CLI** in Phase 7 (the client needs a server to talk to).
 

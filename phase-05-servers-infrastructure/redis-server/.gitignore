@@ -1,0 +1,15 @@
+# Compiled binaries (module builds to ./redisserver; --o redis-server also used)
+/redisserver
+/redis-server
+*.exe
+
+# Generated snapshot files / persistence artifacts
+*.rdb
+dump.rdb
+
+# Go test/build artifacts
+*.test
+*.out
+
+# Editor / OS noise
+.DS_Store
