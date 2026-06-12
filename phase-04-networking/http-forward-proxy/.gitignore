@@ -1,0 +1,11 @@
+# Compiled binary for this challenge
+/http-forward-proxy
+/httpproxy
+
+# Go build artifacts
+*.exe
+*.test
+*.out
+
+# Editor / OS noise
+.DS_Store

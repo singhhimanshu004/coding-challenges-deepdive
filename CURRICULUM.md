@@ -143,12 +143,12 @@ For **every** challenge, you write the teaching README *before* the code. This i
 | # | Challenge | Diff | Lang | ⏱️ | Why this language / what it teaches | ✅ |
 |---|-----------|------|------|----|-------------------------------------|----|
 | 23 | **DNS Resolver** | 🔵 | 🟦 Go | M | UDP sockets + hand-encoding/decoding the DNS wire format; recursive resolution from the root. | [x] |
-| 24 | **DNS Forwarder** | 🔵 | 🟦 Go | M | Becomes a *server*: listen on UDP, forward queries, cache responses with TTL. Depends on #23. | [ ] |
+| 24 | **DNS Forwarder** | 🔵 | 🟦 Go | M | Becomes a *server*: listen on UDP, forward queries, cache responses with TTL. Depends on #23. | [x] |
 | 25 | **NTP Client** | 🔵 | 🟦 Go | S | A tight 48-byte UDP packet; struct packing and clock-offset math. | [x] |
-| 26 | **Traceroute** | 🔵 | 🟦 Go | M | Raw sockets, ICMP, and incrementing TTL to discover the path hop by hop. | [ ] |
+| 26 | **Traceroute** | 🔵 | 🟦 Go | M | Raw sockets, ICMP, and incrementing TTL to discover the path hop by hop. | [x] |
 | 27 | **Port Scanner** | 🔵 | 🟦 Go | M | TCP connect scanning at scale; goroutines + worker pools + timeouts. | [x] |
 | 28 | **Netcat** | 🔵→🟠 | 🟦 Go | M | Bidirectional TCP/UDP relay between sockets and stdin/stdout — the networking "Swiss-army knife". | [x] |
-| 29 | **HTTP Forward Proxy** | 🟠 | 🟦 Go | L | HTTP `CONNECT`, request rewriting, TLS tunnelling, connection management. Ties HTTP to raw sockets. | [ ] |
+| 29 | **HTTP Forward Proxy** | 🟠 | 🟦 Go | L | HTTP `CONNECT`, request rewriting, TLS tunnelling, connection management. Ties HTTP to raw sockets. | [x] |
 
 **🎓 Why Go owns this phase:** Go was built for networked systems — goroutines make concurrent connections trivial, and `net` gives clean socket abstractions with no runtime to deploy. **Order matters:** Resolver → Forwarder (the forwarder *is* a resolver plus a server), and the connection-oriented tools (Netcat, Proxy) come after the connectionless UDP tools (DNS, NTP).
 
